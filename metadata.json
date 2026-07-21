@@ -1,0 +1,6 @@
+{
+  "name": "Restaurant Ordering & Delivery Platform",
+  "description": "A comprehensive restaurant food ordering platform with customer website, real-time tracking, admin dashboard, menu management, and delivery partner panel.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
