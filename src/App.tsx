@@ -6,6 +6,7 @@ import CartDrawer from './components/CartDrawer';
 import AdminDashboard from './components/AdminDashboard';
 import DeliveryDashboard from './components/DeliveryDashboard';
 import { Category, MenuItem, Order, RestaurantSettings, CartItem, Notification, User } from './types';
+import { safeFetchJson } from './lib/api';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -35,19 +36,15 @@ export default function App() {
   // Initial data loader
   const loadInitialData = async () => {
     try {
-      const [catsRes, menuRes, settingsRes] = await Promise.all([
-        fetch('/api/categories'),
-        fetch('/api/menu'),
-        fetch('/api/settings')
+      const [cats, menu, sets] = await Promise.all([
+        safeFetchJson('/api/categories').catch(() => []),
+        safeFetchJson('/api/menu').catch(() => []),
+        safeFetchJson('/api/settings').catch(() => null)
       ]);
 
-      const cats = await catsRes.json();
-      const menu = await menuRes.json();
-      const sets = await settingsRes.json();
-
-      setCategories(cats);
-      setMenuItems(menu);
-      setSettings(sets);
+      if (Array.isArray(cats)) setCategories(cats);
+      if (Array.isArray(menu)) setMenuItems(menu);
+      if (sets) setSettings(sets);
     } catch (err) {
       console.error('Failed to load menu or settings data:', err);
     }
@@ -60,25 +57,24 @@ export default function App() {
       const ordersUrl = `/api/orders?userId=${user.id}&role=${user.role}`;
       const notifsUrl = `/api/notifications?userId=${user.id}`;
 
-      const [ordersRes, notifsRes] = await Promise.all([
-        fetch(ordersUrl),
-        fetch(notifsUrl)
+      const [ords, notifs] = await Promise.all([
+        safeFetchJson(ordersUrl).catch(() => []),
+        safeFetchJson(notifsUrl).catch(() => [])
       ]);
 
-      const ords = await ordersRes.json();
-      const notifs = await notifsRes.json();
+      if (Array.isArray(ords)) setOrders(ords);
 
-      setOrders(ords);
-
-      // Real-time detection: Trigger Toast if new unread notification arrives
-      setNotifications(prev => {
-        const unreadNew = notifs.filter((n: Notification) => !n.read && !prev.some(p => p.id === n.id));
-        if (unreadNew.length > 0) {
-          setActiveToast(unreadNew[0]);
-          setTimeout(() => setActiveToast(null), 5000);
-        }
-        return notifs;
-      });
+      if (Array.isArray(notifs)) {
+        // Real-time detection: Trigger Toast if new unread notification arrives
+        setNotifications(prev => {
+          const unreadNew = notifs.filter((n: Notification) => !n.read && !prev.some(p => p.id === n.id));
+          if (unreadNew.length > 0) {
+            setActiveToast(unreadNew[0]);
+            setTimeout(() => setActiveToast(null), 5000);
+          }
+          return notifs;
+        });
+      }
     } catch (err) {
       console.error('Failed to fetch orders or notifications:', err);
     }

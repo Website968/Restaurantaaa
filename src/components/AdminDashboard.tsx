@@ -22,6 +22,7 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { Category, MenuItem, Order, RestaurantSettings, User, DashboardStats } from '../types';
+import { safeFetchJson } from '../lib/api';
 
 interface AdminDashboardProps {
   user: User;
@@ -86,8 +87,7 @@ export default function AdminDashboard({
   const fetchUsersList = async () => {
     setLoadingUsers(true);
     try {
-      const res = await fetch('/api/users');
-      const data = await res.json();
+      const data = await safeFetchJson('/api/users');
       setUsersList(data);
     } catch (err) {
       console.error('Failed to fetch users list:', err);
@@ -104,13 +104,11 @@ export default function AdminDashboard({
 
   const handleApproveDeliveryPartner = async (userId: string, status: 'approved' | 'rejected') => {
     try {
-      const res = await fetch('/api/admin/delivery-partners/approve', {
+      const data = await safeFetchJson('/api/admin/delivery-partners/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId, status })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to update status');
       fetchUsersList();
     } catch (err: any) {
       alert(err.message);
@@ -124,7 +122,7 @@ export default function AdminDashboard({
     setCreatingAdmin(true);
 
     try {
-      const res = await fetch('/api/admin/create-admin', {
+      const data = await safeFetchJson('/api/admin/create-admin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -134,8 +132,6 @@ export default function AdminDashboard({
           phone: newAdminPhone
         })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to create admin');
 
       setAdminFormMsg('New admin account created successfully!');
       setNewAdminName('');
@@ -199,8 +195,7 @@ export default function AdminDashboard({
   const fetchStats = async () => {
     setLoadingStats(true);
     try {
-      const res = await fetch('/api/dashboard-stats');
-      const data = await res.json();
+      const data = await safeFetchJson('/api/dashboard-stats');
       setStats(data);
     } catch (err) {
       console.error('Error fetching analytics:', err);

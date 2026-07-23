@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { User, Mail, Lock, Bike, ShoppingBag, Eye, EyeOff, ShieldCheck } from 'lucide-react';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '../lib/firebase';
+import { safeFetchJson } from '../lib/api';
 
 interface AuthModalProps {
   onLogin: (user: any, token: string) => void;
@@ -37,13 +38,11 @@ export default function AuthModal({ onLogin }: AuthModalProps) {
 
     try {
       if (mode === 'forgot') {
-        const res = await fetch('/api/auth/forgot-password', {
+        const data = await safeFetchJson('/api/auth/forgot-password', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, newPassword: password })
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Password reset failed');
         setSuccessMsg('Password has been reset successfully! You can now log in with your new password.');
         setMode('login');
       } else if (mode === 'login') {
@@ -58,13 +57,11 @@ export default function AuthModal({ onLogin }: AuthModalProps) {
           console.warn('Firebase Auth signin attempt:', fbErr?.code, fbErr?.message);
         }
 
-        const res = await fetch('/api/auth/login', {
+        const data = await safeFetchJson('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, password, firebaseUid, firebaseEmail })
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Invalid credentials');
 
         // Check Delivery Partner approval status
         if (data.user.role === 'delivery') {
@@ -83,13 +80,11 @@ export default function AuthModal({ onLogin }: AuthModalProps) {
           console.warn('Firebase Auth register attempt:', fbErr?.code, fbErr?.message);
         }
 
-        const res = await fetch('/api/auth/register', {
+        const data = await safeFetchJson('/api/auth/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name, email, password, phone, address, landmark })
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Registration failed');
         onLogin(data.user, data.token);
       } else if (mode === 'signup-delivery') {
         try {
@@ -98,7 +93,7 @@ export default function AuthModal({ onLogin }: AuthModalProps) {
           console.warn('Firebase Auth register attempt:', fbErr?.code, fbErr?.message);
         }
 
-        const res = await fetch('/api/auth/register-delivery', {
+        const data = await safeFetchJson('/api/auth/register-delivery', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -111,8 +106,6 @@ export default function AuthModal({ onLogin }: AuthModalProps) {
             licenseNumber
           })
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Delivery partner registration failed');
 
         setSuccessMsg(data.message || 'Application submitted successfully! Your account is pending admin approval.');
         setMode('login');

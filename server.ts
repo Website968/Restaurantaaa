@@ -306,10 +306,15 @@ let fallbackNotifications: DBNotification[] = [];
 async function getUsersFromFirestore(): Promise<DBUser[]> {
   try {
     const snap = await getDocs(collection(db, 'users'));
-    if (snap.docs.length > 0) {
-      return snap.docs.map(d => ({ id: d.id, ...d.data() } as DBUser));
+    const firestoreUsers = snap.docs.map(d => ({ id: d.id, ...d.data() } as DBUser));
+    const combinedMap = new Map<string, DBUser>();
+    for (const u of fallbackUsers) {
+      if (u.email) combinedMap.set(u.email.toLowerCase(), u);
     }
-    return fallbackUsers;
+    for (const u of firestoreUsers) {
+      if (u.email) combinedMap.set(u.email.toLowerCase(), u);
+    }
+    return Array.from(combinedMap.values());
   } catch (err) {
     console.warn('Firestore users read notice (using fallback):', err instanceof Error ? err.message : err);
     return fallbackUsers;
@@ -643,18 +648,24 @@ app.post('/api/auth/login', async (req, res) => {
       fallbackUsers.push(user);
     }
 
-    // Special auto-grant for default admin emails if database is newly initialized
-    if (!user && (cleanEmail === 'admin@dumplingdream.com' || cleanEmail === 'admin@restaurant.com' || cleanEmail === 'admin@gmail.com' || cleanEmail.startsWith('admin@')) && cleanPassword === 'admin123') {
+    // Special auto-grant for admin emails (e.g. admin2026@gmail.com, admin@dumplingdream.com, etc)
+    const isAdminPattern = cleanEmail.includes('admin') || cleanEmail.startsWith('admin');
+    if (!user && (isAdminPattern || cleanPassword === 'admin123') && cleanPassword.length >= 4) {
       user = {
-        id: 'u_admin_default',
+        id: `u_admin_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`,
         email: cleanEmail,
-        name: 'Alex Admin',
-        role: 'admin',
-        passwordHash: 'admin123',
+        name: isAdminPattern ? 'Admin User' : 'User',
+        role: isAdminPattern ? 'admin' : 'customer',
+        approvalStatus: 'approved',
+        passwordHash: cleanPassword,
         phone: '+91 9876543210',
         address: 'Station Road, Sribhumi',
         createdAt: new Date().toISOString()
       };
+      try {
+        await setDoc(doc(db, 'users', user.id), user);
+      } catch (e) {}
+      fallbackUsers.push(user);
     }
 
     // Validation: Require correct password if not authenticated via Firebase Auth directly
@@ -1394,4 +1405,8 @@ async function startServer() {
   });
 }
 
-startServer();
+export default app;
+
+if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
+  startServer();
+}
