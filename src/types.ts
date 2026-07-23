@@ -3,9 +3,14 @@ export interface User {
   email: string;
   name: string;
   role: 'customer' | 'admin' | 'delivery';
+  approvalStatus?: 'approved' | 'pending' | 'rejected';
   phone?: string;
   address?: string;
   landmark?: string;
+  vehicleType?: string;
+  licenseNumber?: string;
+  rewardPoints?: number;
+  referralCode?: string;
   createdAt: string;
 }
 
@@ -26,6 +31,9 @@ export interface MenuItem {
   image: string;
   isAvailable: boolean;
   isFeatured: boolean;
+  isVeg?: boolean;
+  isSpecial?: boolean;
+  spiceLevel?: number; // 0 for none, 1-3 for chilis
   discountPercent: number; // 0 for no discount
   createdAt: string;
 }
@@ -60,6 +68,9 @@ export interface Order {
   deliveryAddress: string;
   landmark?: string;
   notes?: string;
+  orderType?: 'Pickup' | 'Delivery';
+  paymentMethod?: 'UPI/QR' | 'Cash';
+  couponCode?: string;
   items: OrderItem[];
   subtotal: number;
   deliveryCharge: number;
@@ -86,6 +97,8 @@ export interface RestaurantSettings {
   facebookUrl: string;
   twitterUrl: string;
   instagramUrl: string;
+  whatsappNumber?: string;
+  locationUrl?: string;
   aboutSection: string;
   contactEmail: string;
   contactPhone: string;

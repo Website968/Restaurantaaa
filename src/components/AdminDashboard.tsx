@@ -18,7 +18,8 @@ import {
   X,
   Bike,
   Sparkles,
-  RefreshCw
+  RefreshCw,
+  ShieldCheck
 } from 'lucide-react';
 import { Category, MenuItem, Order, RestaurantSettings, User, DashboardStats } from '../types';
 
@@ -55,15 +56,100 @@ export default function AdminDashboard({
   onUpdateOrderStatus,
   currentSubTab
 }: AdminDashboardProps) {
-  const [subTab, setSubTab] = useState<'stats' | 'orders' | 'menu' | 'categories' | 'settings'>('stats');
+  const [subTab, setSubTab] = useState<'stats' | 'orders' | 'menu' | 'categories' | 'users' | 'settings'>('stats');
   
   useEffect(() => {
     if (currentSubTab === 'dashboard') setSubTab('stats');
-    else if (currentSubTab === 'menu') setSubTab('menu');
+    else if (currentSubTab === 'menu' || currentSubTab === 'admin-menu') setSubTab('menu');
     else if (currentSubTab === 'categories') setSubTab('categories');
-    else if (currentSubTab === 'orders') setSubTab('orders');
-    else if (currentSubTab === 'settings') setSubTab('settings');
+    else if (currentSubTab === 'orders' || currentSubTab === 'admin-orders') setSubTab('orders');
+    else if (currentSubTab === 'users' || currentSubTab === 'admin-users') setSubTab('users');
+    else if (currentSubTab === 'settings' || currentSubTab === 'admin-settings') setSubTab('settings');
   }, [currentSubTab]);
+
+  // Users & Delivery Partner Management State
+  const [usersList, setUsersList] = useState<User[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+  const [userRoleFilter, setUserRoleFilter] = useState<'all' | 'delivery' | 'admin' | 'customer'>('delivery');
+  const [deliveryStatusFilter, setDeliveryStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+
+  // Create Admin Form State
+  const [showAdminForm, setShowAdminForm] = useState(false);
+  const [newAdminName, setNewAdminName] = useState('');
+  const [newAdminEmail, setNewAdminEmail] = useState('');
+  const [newAdminPassword, setNewAdminPassword] = useState('');
+  const [newAdminPhone, setNewAdminPhone] = useState('');
+  const [adminFormMsg, setAdminFormMsg] = useState('');
+  const [adminFormErr, setAdminFormErr] = useState('');
+  const [creatingAdmin, setCreatingAdmin] = useState(false);
+
+  const fetchUsersList = async () => {
+    setLoadingUsers(true);
+    try {
+      const res = await fetch('/api/users');
+      const data = await res.json();
+      setUsersList(data);
+    } catch (err) {
+      console.error('Failed to fetch users list:', err);
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  useEffect(() => {
+    if (subTab === 'users') {
+      fetchUsersList();
+    }
+  }, [subTab]);
+
+  const handleApproveDeliveryPartner = async (userId: string, status: 'approved' | 'rejected') => {
+    try {
+      const res = await fetch('/api/admin/delivery-partners/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, status })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update status');
+      fetchUsersList();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
+
+  const handleCreateAdminSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAdminFormErr('');
+    setAdminFormMsg('');
+    setCreatingAdmin(true);
+
+    try {
+      const res = await fetch('/api/admin/create-admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newAdminName,
+          email: newAdminEmail,
+          password: newAdminPassword,
+          phone: newAdminPhone
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to create admin');
+
+      setAdminFormMsg('New admin account created successfully!');
+      setNewAdminName('');
+      setNewAdminEmail('');
+      setNewAdminPassword('');
+      setNewAdminPhone('');
+      setShowAdminForm(false);
+      fetchUsersList();
+    } catch (err: any) {
+      setAdminFormErr(err.message);
+    } finally {
+      setCreatingAdmin(false);
+    }
+  };
 
   // General statistics loader
   const [stats, setStats] = useState<DashboardStats | null>(null);
@@ -235,6 +321,7 @@ export default function AdminDashboard({
           { id: 'orders', label: 'Orders' },
           { id: 'menu', label: 'Menu' },
           { id: 'categories', label: 'Categories' },
+          { id: 'users', label: 'Users & Delivery' },
           { id: 'settings', label: 'Settings' }
         ].map(tb => (
           <button
@@ -1175,6 +1262,277 @@ export default function AdminDashboard({
               </button>
             </div>
           </form>
+        )}
+
+        {/* SUBTAB 5: USERS & DELIVERY PARTNERS MANAGEMENT */}
+        {subTab === 'users' && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-stone-200">
+              <div>
+                <h2 className="text-xl font-black text-stone-900 uppercase tracking-tight">User & Delivery Partner Directory</h2>
+                <p className="text-stone-500 text-xs font-semibold">Review delivery partner applications, manage admin staff, and inspect accounts</p>
+              </div>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={fetchUsersList}
+                  className="p-2 border border-stone-200 bg-white hover:bg-stone-50 text-stone-700 rounded-lg shadow-sm transition-colors"
+                  title="Refresh User Directory"
+                >
+                  <RefreshCw size={16} />
+                </button>
+                <button
+                  onClick={() => setShowAdminForm(!showAdminForm)}
+                  className="bg-stone-900 hover:bg-stone-800 text-white font-black px-4 py-2 rounded-lg text-xs uppercase tracking-wider flex items-center space-x-1.5 shadow"
+                >
+                  <Plus size={15} />
+                  <span>Create Admin</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Create Admin Form Modal / Card */}
+            {showAdminForm && (
+              <div className="bg-white border-2 border-stone-900 rounded-xl p-5 shadow-lg max-w-lg">
+                <div className="flex justify-between items-center mb-3">
+                  <h3 className="text-sm font-black text-stone-900 uppercase tracking-wider">Create New Administrator Account</h3>
+                  <button
+                    onClick={() => setShowAdminForm(false)}
+                    className="text-stone-400 hover:text-stone-700"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                {adminFormErr && (
+                  <div className="mb-3 p-2.5 bg-red-100 border border-red-300 text-red-800 text-xs rounded-lg font-bold">
+                    {adminFormErr}
+                  </div>
+                )}
+                {adminFormMsg && (
+                  <div className="mb-3 p-2.5 bg-emerald-100 border border-emerald-300 text-emerald-800 text-xs rounded-lg font-bold">
+                    {adminFormMsg}
+                  </div>
+                )}
+
+                <form onSubmit={handleCreateAdminSubmit} className="space-y-3">
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-stone-500 mb-1">Full Name</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Admin Name"
+                      value={newAdminName}
+                      onChange={(e) => setNewAdminName(e.target.value)}
+                      className="w-full px-3 py-2 border border-stone-300 rounded-lg text-xs focus:outline-none focus:border-stone-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-bold text-stone-500 mb-1">Email Address</label>
+                    <input
+                      type="email"
+                      required
+                      placeholder="admin@restaurant.com"
+                      value={newAdminEmail}
+                      onChange={(e) => setNewAdminEmail(e.target.value)}
+                      className="w-full px-3 py-2 border border-stone-300 rounded-lg text-xs focus:outline-none focus:border-stone-900"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-stone-500 mb-1">Password</label>
+                      <input
+                        type="password"
+                        required
+                        placeholder="••••••••"
+                        value={newAdminPassword}
+                        onChange={(e) => setNewAdminPassword(e.target.value)}
+                        className="w-full px-3 py-2 border border-stone-300 rounded-lg text-xs focus:outline-none focus:border-stone-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-stone-500 mb-1">Phone</label>
+                      <input
+                        type="tel"
+                        placeholder="+91 9876543210"
+                        value={newAdminPhone}
+                        onChange={(e) => setNewAdminPhone(e.target.value)}
+                        className="w-full px-3 py-2 border border-stone-300 rounded-lg text-xs focus:outline-none focus:border-stone-900"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end space-x-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowAdminForm(false)}
+                      className="px-4 py-2 border border-stone-200 text-stone-600 rounded-lg text-xs font-bold"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={creatingAdmin}
+                      className="px-5 py-2 bg-stone-900 hover:bg-stone-800 text-white rounded-lg text-xs font-bold uppercase tracking-wider"
+                    >
+                      {creatingAdmin ? 'Creating...' : 'Save Admin'}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            )}
+
+            {/* Role Category Tabs */}
+            <div className="flex space-x-2 border-b border-stone-200 pb-2">
+              {[
+                { id: 'delivery', label: 'Delivery Partners', icon: <Bike size={14} /> },
+                { id: 'admin', label: 'Admins & Staff', icon: <ShieldCheck size={14} /> },
+                { id: 'customer', label: 'Customers', icon: <Users size={14} /> },
+                { id: 'all', label: 'All Accounts', icon: <Users size={14} /> }
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setUserRoleFilter(tab.id as any)}
+                  className={`px-3.5 py-1.5 text-xs font-bold rounded-lg flex items-center space-x-1.5 transition-all ${
+                    userRoleFilter === tab.id
+                      ? 'bg-stone-900 text-white shadow'
+                      : 'bg-white border border-stone-200 text-stone-600 hover:bg-stone-100'
+                  }`}
+                >
+                  {tab.icon}
+                  <span>{tab.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Delivery Partner Status Sub-Filter */}
+            {userRoleFilter === 'delivery' && (
+              <div className="flex items-center space-x-2 bg-stone-100 p-2 rounded-lg">
+                <span className="text-[10px] font-black uppercase text-stone-500 tracking-wider">Status:</span>
+                {(['all', 'pending', 'approved', 'rejected'] as const).map(st => (
+                  <button
+                    key={st}
+                    onClick={() => setDeliveryStatusFilter(st)}
+                    className={`px-3 py-1 text-[10px] font-extrabold uppercase rounded-md transition-all ${
+                      deliveryStatusFilter === st
+                        ? 'bg-amber-600 text-white shadow'
+                        : 'bg-white text-stone-600 hover:bg-stone-200'
+                    }`}
+                  >
+                    {st}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {loadingUsers ? (
+              <div className="py-16 text-center">
+                <span className="inline-block w-7 h-7 border-4 border-stone-200 border-t-stone-800 rounded-full animate-spin"></span>
+                <p className="text-stone-400 text-xs mt-2 font-medium">Fetching accounts from Firestore...</p>
+              </div>
+            ) : (
+              <div className="bg-white border border-stone-200 rounded-xl overflow-hidden shadow-sm">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-stone-100 border-b border-stone-200 text-[10px] font-black uppercase text-stone-500 tracking-wider">
+                      <tr>
+                        <th className="p-3.5">User</th>
+                        <th className="p-3.5">Role</th>
+                        <th className="p-3.5">Contact Details</th>
+                        <th className="p-3.5">Vehicle Specs</th>
+                        <th className="p-3.5">Approval Status</th>
+                        <th className="p-3.5 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-stone-100">
+                      {usersList
+                        .filter(u => {
+                          if (userRoleFilter !== 'all' && u.role !== userRoleFilter) return false;
+                          if (u.role === 'delivery' && deliveryStatusFilter !== 'all') {
+                            const status = u.approvalStatus || 'approved';
+                            if (status !== deliveryStatusFilter) return false;
+                          }
+                          return true;
+                        })
+                        .map(u => {
+                          const status = u.approvalStatus || 'approved';
+                          return (
+                            <tr key={u.id} className="hover:bg-stone-50/80 transition-colors">
+                              <td className="p-3.5">
+                                <p className="font-extrabold text-stone-900">{u.name}</p>
+                                <p className="text-[11px] text-stone-500">{u.email}</p>
+                              </td>
+                              <td className="p-3.5">
+                                <span className={`inline-block px-2 py-0.5 text-[9px] font-extrabold uppercase rounded ${
+                                  u.role === 'admin'
+                                    ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                                    : u.role === 'delivery'
+                                    ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                                    : 'bg-stone-100 text-stone-700 border border-stone-200'
+                                }`}>
+                                  {u.role}
+                                </span>
+                              </td>
+                              <td className="p-3.5">
+                                <p className="text-stone-800 font-medium">{u.phone || 'N/A'}</p>
+                                <p className="text-[10px] text-stone-500 truncate max-w-xs">{u.address || 'N/A'}</p>
+                              </td>
+                              <td className="p-3.5">
+                                {u.role === 'delivery' ? (
+                                  <div>
+                                    <p className="font-bold text-stone-800">{u.vehicleType || 'Bike'}</p>
+                                    <p className="text-[10px] text-stone-500 font-mono">{u.licenseNumber || 'N/A'}</p>
+                                  </div>
+                                ) : (
+                                  <span className="text-stone-400">—</span>
+                                )}
+                              </td>
+                              <td className="p-3.5">
+                                <span className={`inline-flex items-center space-x-1 px-2.5 py-1 text-[10px] font-black uppercase rounded-full ${
+                                  status === 'approved'
+                                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                    : status === 'pending'
+                                    ? 'bg-amber-100 text-amber-800 border border-amber-300 animate-pulse'
+                                    : 'bg-red-100 text-red-800 border border-red-300'
+                                }`}>
+                                  {status === 'approved' && <Check size={12} />}
+                                  {status === 'pending' && <Clock size={12} />}
+                                  {status === 'rejected' && <X size={12} />}
+                                  <span>{status}</span>
+                                </span>
+                              </td>
+                              <td className="p-3.5 text-right">
+                                {u.role === 'delivery' && (
+                                  <div className="flex items-center justify-end space-x-1.5">
+                                    {status !== 'approved' && (
+                                      <button
+                                        onClick={() => handleApproveDeliveryPartner(u.id, 'approved')}
+                                        className="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold px-2.5 py-1 rounded shadow"
+                                        title="Approve Delivery Partner"
+                                      >
+                                        Approve
+                                      </button>
+                                    )}
+                                    {status !== 'rejected' && (
+                                      <button
+                                        onClick={() => handleApproveDeliveryPartner(u.id, 'rejected')}
+                                        className="bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold px-2.5 py-1 rounded shadow"
+                                        title="Reject Delivery Partner"
+                                      >
+                                        Reject
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
 

@@ -1,6 +1,6 @@
 {
-  "name": "Restaurant Ordering & Delivery Platform",
-  "description": "A comprehensive restaurant food ordering platform with customer website, real-time tracking, admin dashboard, menu management, and delivery partner panel.",
+  "name": "Dumpling Dream",
+  "description": "Fresh, Hot & Delicious Momos ordering platform with reward points, live order tracking, pickup/delivery, UPI/QR and Cash payments, admin dashboard, and delivery portal.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

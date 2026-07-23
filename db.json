@@ -1,0 +1,222 @@
+{
+  "users": [
+    {
+      "id": "u1",
+      "email": "admin@dumplingdream.com",
+      "name": "Admin Owner",
+      "role": "admin",
+      "passwordHash": "admin123",
+      "phone": "+91 9876543210",
+      "address": "Station Road, Sribhumi, Assam, 788710",
+      "rewardPoints": 150,
+      "referralCode": "ADMIN01",
+      "createdAt": "2026-07-21T10:00:00.000Z"
+    },
+    {
+      "id": "u2",
+      "email": "rider@dumplingdream.com",
+      "name": "Delivery Rider",
+      "role": "delivery",
+      "passwordHash": "delivery123",
+      "phone": "+91 9876543211",
+      "address": "Station Road, Sribhumi, Assam, 788710",
+      "rewardPoints": 50,
+      "referralCode": "RIDER01",
+      "createdAt": "2026-07-21T10:00:00.000Z"
+    },
+    {
+      "id": "u3",
+      "email": "pronotoshbhattacharjee@gmail.com",
+      "name": "Prakash",
+      "role": "customer",
+      "passwordHash": "customer123",
+      "phone": "+91 9876543212",
+      "address": "Station Road, Sribhumi, Assam, 788710",
+      "landmark": "Near Railway Station",
+      "rewardPoints": 0,
+      "referralCode": "27ZDUZRC",
+      "createdAt": "2026-07-21T10:00:00.000Z"
+    }
+  ],
+  "categories": [
+    {
+      "id": "c1",
+      "name": "Steamed",
+      "icon": "soup",
+      "description": "Traditional Himalayan steamed momos served with spicy chutney",
+      "active": true
+    },
+    {
+      "id": "c2",
+      "name": "Fried",
+      "icon": "flame",
+      "description": "Crispy golden fried momos with rich house dipping sauces",
+      "active": true
+    },
+    {
+      "id": "c3",
+      "name": "Gravy",
+      "icon": "bowl",
+      "description": "Juicy momos submerged in hot, spicy & savory rich gravy",
+      "active": true
+    },
+    {
+      "id": "c4",
+      "name": "Kurkure",
+      "icon": "sparkles",
+      "description": "Extra crunchy kurkure-coated special crispy momos",
+      "active": true
+    },
+    {
+      "id": "c5",
+      "name": "Extras",
+      "icon": "glass-water",
+      "description": "Dips, spicy schezwan sauces & chilled drinks",
+      "active": true
+    }
+  ],
+  "menuItems": [
+    {
+      "id": "m1",
+      "name": "Paneer Steamed Momos",
+      "description": "Soft, juicy paneer momos steamed to perfection",
+      "price": 50,
+      "categoryId": "c1",
+      "image": "https://images.unsplash.com/photo-1541696432-82c6da8ce7bf?auto=format&fit=crop&w=600&q=80",
+      "isAvailable": true,
+      "isFeatured": true,
+      "isVeg": true,
+      "isSpecial": true,
+      "spiceLevel": 1,
+      "discountPercent": 0,
+      "createdAt": "2026-07-21T10:00:00.000Z"
+    },
+    {
+      "id": "m2",
+      "name": "Paneer Fried Momos",
+      "description": "Crispy golden fried paneer momos with tangy chutney",
+      "price": 70,
+      "categoryId": "c2",
+      "image": "https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=600&q=80",
+      "isAvailable": true,
+      "isFeatured": false,
+      "isVeg": true,
+      "isSpecial": false,
+      "spiceLevel": 2,
+      "discountPercent": 0,
+      "createdAt": "2026-07-21T10:00:00.000Z"
+    },
+    {
+      "id": "m3",
+      "name": "Paneer Gravy Momos",
+      "description": "Paneer momos in rich, flavorful gravy",
+      "price": 100,
+      "categoryId": "c3",
+      "image": "https://images.unsplash.com/photo-1563245372-f21724e3856d?auto=format&fit=crop&w=600&q=80",
+      "isAvailable": true,
+      "isFeatured": true,
+      "isVeg": true,
+      "isSpecial": true,
+      "spiceLevel": 2,
+      "discountPercent": 0,
+      "createdAt": "2026-07-21T10:00:00.000Z"
+    },
+    {
+      "id": "m4",
+      "name": "Paneer Kurkure Momos",
+      "description": "Extra crunchy kurkure-coated paneer momos",
+      "price": 80,
+      "categoryId": "c4",
+      "image": "https://images.unsplash.com/photo-1525755662778-989d0524087e?auto=format&fit=crop&w=600&q=80",
+      "isAvailable": true,
+      "isFeatured": false,
+      "isVeg": true,
+      "isSpecial": false,
+      "spiceLevel": 2,
+      "discountPercent": 0,
+      "createdAt": "2026-07-21T10:00:00.000Z"
+    },
+    {
+      "id": "m5",
+      "name": "Chicken Steamed Momos",
+      "description": "Juicy chicken momos with authentic Himalayan spices",
+      "price": 50,
+      "categoryId": "c1",
+      "image": "https://images.unsplash.com/photo-1496116218417-1a781b1c416c?auto=format&fit=crop&w=600&q=80",
+      "isAvailable": true,
+      "isFeatured": true,
+      "isVeg": false,
+      "isSpecial": true,
+      "spiceLevel": 1,
+      "discountPercent": 0,
+      "createdAt": "2026-07-21T10:00:00.000Z"
+    },
+    {
+      "id": "m6",
+      "name": "Chicken Fried Momos",
+      "description": "Golden crispy chicken momos with schezwan sauce",
+      "price": 70,
+      "categoryId": "c2",
+      "image": "https://images.unsplash.com/photo-1534422298391-e4f8c172dddb?auto=format&fit=crop&w=600&q=80",
+      "isAvailable": true,
+      "isFeatured": false,
+      "isVeg": false,
+      "isSpecial": false,
+      "spiceLevel": 2,
+      "discountPercent": 0,
+      "createdAt": "2026-07-21T10:00:00.000Z"
+    },
+    {
+      "id": "m7",
+      "name": "Chicken Gravy Momos",
+      "description": "Tender chicken momos in aromatic gravy",
+      "price": 100,
+      "categoryId": "c3",
+      "image": "https://images.unsplash.com/photo-1563245372-f21724e3856d?auto=format&fit=crop&w=600&q=80",
+      "isAvailable": true,
+      "isFeatured": true,
+      "isVeg": false,
+      "isSpecial": true,
+      "spiceLevel": 3,
+      "discountPercent": 0,
+      "createdAt": "2026-07-21T10:00:00.000Z"
+    },
+    {
+      "id": "m8",
+      "name": "Chicken Kurkure Momos",
+      "description": "Extra crunchy kurkure chicken momos",
+      "price": 80,
+      "categoryId": "c4",
+      "image": "https://images.unsplash.com/photo-1525755662778-989d0524087e?auto=format&fit=crop&w=600&q=80",
+      "isAvailable": true,
+      "isFeatured": false,
+      "isVeg": false,
+      "isSpecial": false,
+      "spiceLevel": 2,
+      "discountPercent": 0,
+      "createdAt": "2026-07-21T10:00:00.000Z"
+    }
+  ],
+  "orders": [],
+  "settings": {
+    "restaurantName": "Dumpling Dream",
+    "logo": "https://images.unsplash.com/photo-1541696432-82c6da8ce7bf?auto=format&fit=crop&w=150&h=150&q=80",
+    "banner": "https://images.unsplash.com/photo-1496116218417-1a781b1c416c?auto=format&fit=crop&w=1200&q=80",
+    "address": "Station Road, Sribhumi, Assam, 788710",
+    "phone": "+91 9876543210",
+    "email": "pronotoshbhattacharjee@gmail.com",
+    "deliveryCharge": 20,
+    "minOrder": 50,
+    "openingHours": "10:00 AM",
+    "closingHours": "10:00 PM",
+    "facebookUrl": "https://facebook.com",
+    "twitterUrl": "https://twitter.com",
+    "instagramUrl": "https://instagram.com",
+    "whatsappNumber": "919876543210",
+    "locationUrl": "https://maps.google.com/?q=Station+Road,Sribhumi,Assam,788710",
+    "aboutSection": "Welcome to Dumpling Dream! We serve fresh, authentic, and delicious momos made with love. From traditional steamed momos to crispy fried varieties, we have something for everyone.",
+    "contactEmail": "pronotoshbhattacharjee@gmail.com",
+    "contactPhone": "+91 9876543210"
+  },
+  "notifications": []
+}

@@ -2,24 +2,48 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
+import firebaseConfig from './firebase-applet-config.json' with { type: 'json' };
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import {
+  getFirestore,
+  collection,
+  doc,
+  getDocs,
+  getDoc,
+  setDoc,
+  addDoc,
+  updateDoc,
+  deleteDoc,
+  query,
+  where
+} from 'firebase/firestore';
 
 const app = express();
 const PORT = 3000;
-const dbPath = path.join(process.cwd(), 'db.json');
 
 app.use(express.json());
 
-// Type definitions for DB JSON structure
+// Initialize Firebase App & Firestore Database
+const firebaseApp = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+
+// Use default database for Firestore
+const db = getFirestore(firebaseApp);
+
+// Types
 interface DBUser {
   id: string;
   email: string;
   name: string;
   role: 'customer' | 'admin' | 'delivery';
-  passwordHash: string; // Plaintext or simple hash for dev convenience
+  approvalStatus?: 'approved' | 'pending' | 'rejected';
+  passwordHash: string;
   phone?: string;
   address?: string;
   landmark?: string;
+  vehicleType?: string;
+  licenseNumber?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 interface DBCategory {
@@ -28,6 +52,8 @@ interface DBCategory {
   icon: string;
   description: string;
   active: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 interface DBMenuItem {
@@ -41,6 +67,7 @@ interface DBMenuItem {
   isFeatured: boolean;
   discountPercent: number;
   createdAt: string;
+  updatedAt?: string;
 }
 
 interface DBOrderItem {
@@ -64,6 +91,8 @@ interface DBOrder {
   deliveryCharge: number;
   tax: number;
   total: number;
+  paymentMethod: 'cod' | 'online';
+  paymentStatus: 'pending' | 'completed' | 'failed';
   status: 'Pending' | 'Accepted' | 'Preparing' | 'Ready' | 'Out for Delivery' | 'Delivered' | 'Cancelled';
   deliveryBoyId?: string;
   deliveryBoyName?: string;
@@ -101,766 +130,1250 @@ interface DBNotification {
   userId?: string;
 }
 
-interface DBSchema {
-  users: DBUser[];
-  categories: DBCategory[];
-  menuItems: DBMenuItem[];
-  orders: DBOrder[];
-  settings: DBRestaurantSettings;
-  notifications: DBNotification[];
+// In-Memory Fallback Store (Ensures resilience if Cloud Firestore API is not enabled in Firebase Console)
+let fallbackUsers: DBUser[] = [
+  {
+    id: 'u1',
+    email: 'admin@dumplingdream.com',
+    name: 'Alex Admin',
+    role: 'admin',
+    approvalStatus: 'approved',
+    passwordHash: 'admin123',
+    phone: '+91 9876543210',
+    address: 'Station Road, Sribhumi',
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'u1_alt',
+    email: 'admin@restaurant.com',
+    name: 'Alex Admin',
+    role: 'admin',
+    approvalStatus: 'approved',
+    passwordHash: 'admin123',
+    phone: '+91 9876543210',
+    address: 'Station Road, Sribhumi',
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'u1_gmail',
+    email: 'admin@gmail.com',
+    name: 'Alex Admin',
+    role: 'admin',
+    approvalStatus: 'approved',
+    passwordHash: 'admin123',
+    phone: '+91 9876543210',
+    address: 'Station Road, Sribhumi',
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'u2',
+    email: 'delivery@dumplingdream.com',
+    name: 'Rider Roy',
+    role: 'delivery',
+    approvalStatus: 'approved',
+    passwordHash: 'delivery123',
+    phone: '+91 9876543211',
+    address: 'Delivery Hub, Sribhumi',
+    vehicleType: 'Bike',
+    licenseNumber: 'AS-11-2024-9981',
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'u2_pending',
+    email: 'newrider@dumplingdream.com',
+    name: 'Sam Express',
+    role: 'delivery',
+    approvalStatus: 'pending',
+    passwordHash: 'delivery123',
+    phone: '+91 9876543000',
+    address: 'Central Market, Sribhumi',
+    vehicleType: 'Scooter',
+    licenseNumber: 'AS-11-2026-4432',
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'u3',
+    email: 'customer@restaurant.com',
+    name: 'Chris Customer',
+    role: 'customer',
+    approvalStatus: 'approved',
+    passwordHash: 'customer123',
+    phone: '+91 9876543212',
+    address: '742 Main Terrace, Sribhumi',
+    landmark: 'Near Railway Station',
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'u4',
+    email: 'pronotoshbhattacharjee@gmail.com',
+    name: 'Pronotosh Bhattacharjee',
+    role: 'customer',
+    approvalStatus: 'approved',
+    passwordHash: 'customer123',
+    phone: '+91 9876543210',
+    address: 'Sribhumi',
+    createdAt: new Date().toISOString()
+  }
+];
+
+let fallbackCategories: DBCategory[] = [
+  { id: 'c1', name: 'Steamed Momos', icon: 'soup', description: 'Freshly steamed delicate dumplings filled with seasoned ingredients', active: true },
+  { id: 'c2', name: 'Fried & Kurkure Momos', icon: 'sandwich', description: 'Crispy golden fried momos with crunchy outer crust', active: true },
+  { id: 'c3', name: 'C Gravy & Chili Momos', icon: 'pizza', description: 'Tossed in rich spicy Indo-Chinese chili & garlic gravies', active: true },
+  { id: 'c4', name: 'Sides & Noodles', icon: 'salad', description: 'Hakka noodles, fried rice, and savory side dishes', active: true },
+  { id: 'c5', name: 'Refreshing Beverages', icon: 'glass-water', description: 'Chilled craft sodas, ice teas, and mocktails', active: true }
+];
+
+let fallbackMenuItems: DBMenuItem[] = [
+  {
+    id: 'm1',
+    name: 'Classic Chicken Steamed Momo (10 pcs)',
+    description: 'Hand-crafted dumplings stuffed with juicy minced chicken, spring onions, and Himalayan herbs. Served with spicy tomato chutney.',
+    price: 120,
+    categoryId: 'c1',
+    image: 'https://images.unsplash.com/photo-1541696432-82c6da8ce7bf?auto=format&fit=crop&w=600&q=80',
+    isAvailable: true,
+    isFeatured: true,
+    discountPercent: 10,
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'm2',
+    name: 'Paneer & Veg Steamed Momo (10 pcs)',
+    description: 'Delicate steamed wrappers packed with grated cottage cheese, cabbage, carrots, and subtle aromatic spices.',
+    price: 110,
+    categoryId: 'c1',
+    image: 'https://images.unsplash.com/photo-1625220194771-7ebdea0b70b9?auto=format&fit=crop&w=600&q=80',
+    isAvailable: true,
+    isFeatured: true,
+    discountPercent: 0,
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'm3',
+    name: 'Crunchy Chicken Kurkure Momo',
+    description: 'Coated in a crispy spiced cornflake shell and deep fried until golden. Served with chili mayonnaise.',
+    price: 150,
+    categoryId: 'c2',
+    image: 'https://images.unsplash.com/photo-1534422298391-e4f8c172dddb?auto=format&fit=crop&w=600&q=80',
+    isAvailable: true,
+    isFeatured: true,
+    discountPercent: 5,
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'm4',
+    name: 'Schezwan Chili Chicken Momo',
+    description: 'Deep-fried chicken momos wok-tossed in garlic Schezwan gravy, peppers, and scallions.',
+    price: 160,
+    categoryId: 'c3',
+    image: 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?auto=format&fit=crop&w=600&q=80',
+    isAvailable: true,
+    isFeatured: false,
+    discountPercent: 0,
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'm5',
+    name: 'Special Veg Hakka Noodles',
+    description: 'Wok-tossed noodles with julienned vegetables, white pepper, and light soy sauce.',
+    price: 130,
+    categoryId: 'c4',
+    image: 'https://images.unsplash.com/photo-1585032226651-759b368d7246?auto=format&fit=crop&w=600&q=80',
+    isAvailable: true,
+    isFeatured: false,
+    discountPercent: 0,
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'm6',
+    name: 'Chilled Lemon Mint Cooler',
+    description: 'Zesty lemon juice muddled with crushed garden mint and sparkling soda.',
+    price: 60,
+    categoryId: 'c5',
+    image: 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?auto=format&fit=crop&w=600&q=80',
+    isAvailable: true,
+    isFeatured: false,
+    discountPercent: 0,
+    createdAt: new Date().toISOString()
+  }
+];
+
+let fallbackOrders: DBOrder[] = [];
+let fallbackNotifications: DBNotification[] = [];
+
+// Helper functions for Firestore collections with graceful fallback
+async function getUsersFromFirestore(): Promise<DBUser[]> {
+  try {
+    const snap = await getDocs(collection(db, 'users'));
+    if (snap.docs.length > 0) {
+      return snap.docs.map(d => ({ id: d.id, ...d.data() } as DBUser));
+    }
+    return fallbackUsers;
+  } catch (err) {
+    console.warn('Firestore users read notice (using fallback):', err instanceof Error ? err.message : err);
+    return fallbackUsers;
+  }
 }
 
-// Ensure db.json exists with initial pre-seeded data
-function initializeDatabase() {
-  if (fs.existsSync(dbPath)) {
-    return;
+async function getCategoriesFromFirestore(): Promise<DBCategory[]> {
+  try {
+    const snap = await getDocs(collection(db, 'categories'));
+    if (snap.docs.length > 0) {
+      return snap.docs.map(d => ({ id: d.id, ...d.data() } as DBCategory));
+    }
+    return fallbackCategories;
+  } catch (err) {
+    console.warn('Firestore categories read notice (using fallback):', err instanceof Error ? err.message : err);
+    return fallbackCategories;
   }
+}
 
-  const initialData: DBSchema = {
-    users: [
-      {
-        id: 'u1',
-        email: 'admin@restaurant.com',
+async function getMenuItemsFromFirestore(): Promise<DBMenuItem[]> {
+  try {
+    const snap = await getDocs(collection(db, 'menuItems'));
+    if (snap.docs.length > 0) {
+      return snap.docs.map(d => ({ id: d.id, ...d.data() } as DBMenuItem));
+    }
+    return fallbackMenuItems;
+  } catch (err) {
+    console.warn('Firestore menu read notice (using fallback):', err instanceof Error ? err.message : err);
+    return fallbackMenuItems;
+  }
+}
+
+async function getOrdersFromFirestore(): Promise<DBOrder[]> {
+  try {
+    const snap = await getDocs(collection(db, 'orders'));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() } as DBOrder));
+  } catch (err) {
+    console.warn('Firestore orders read notice (using fallback):', err instanceof Error ? err.message : err);
+    return fallbackOrders;
+  }
+}
+
+async function getSettingsFromFirestore(): Promise<DBRestaurantSettings> {
+  const defaultSettings: DBRestaurantSettings = {
+    restaurantName: 'Dumpling Dream',
+    logo: 'https://images.unsplash.com/photo-1498654896293-37aacf113fd9?auto=format&fit=crop&w=150&h=150&q=80',
+    banner: 'https://images.unsplash.com/photo-1541696432-82c6da8ce7bf?auto=format&fit=crop&w=1200&q=80',
+    address: 'Station Road, Sribhumi, Assam, 788710',
+    phone: '+91 9876543210',
+    email: 'dumplingdream@gmail.com',
+    deliveryCharge: 30.00,
+    minOrder: 150.00,
+    openingHours: '10:00 AM',
+    closingHours: '10:00 PM',
+    facebookUrl: 'https://facebook.com/dumplingdream',
+    twitterUrl: 'https://twitter.com/dumplingdream',
+    instagramUrl: 'https://instagram.com/dumplingdream',
+    aboutSection: 'Welcome to Dumpling Dream! We serve fresh, authentic, and mouth-watering momos & dumplings made with hand-rolled dough and rich aromatic fillings.',
+    contactEmail: 'support@dumplingdream.com',
+    contactPhone: '+91 9876543210',
+  };
+
+  try {
+    const docSnap = await getDoc(doc(db, 'restaurantSettings', 'default'));
+    if (docSnap.exists()) {
+      return { ...defaultSettings, ...docSnap.data() } as DBRestaurantSettings;
+    } else {
+      await setDoc(doc(db, 'restaurantSettings', 'default'), defaultSettings);
+      return defaultSettings;
+    }
+  } catch (err) {
+    console.warn('Firestore settings notice (using fallback):', err instanceof Error ? err.message : err);
+    return defaultSettings;
+  }
+}
+
+async function getNotificationsFromFirestore(): Promise<DBNotification[]> {
+  try {
+    const snap = await getDocs(collection(db, 'notifications'));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() } as DBNotification));
+  } catch (err) {
+    console.warn('Firestore notifications notice (using fallback):', err instanceof Error ? err.message : err);
+    return fallbackNotifications;
+  }
+}
+
+// Initial seed function for Firestore
+async function seedFirestoreIfEmpty() {
+  try {
+    console.log('Checking Firestore initial state...');
+    
+    // 1. Settings
+    try {
+      await getSettingsFromFirestore();
+    } catch (e) {}
+
+    // 2. Categories
+    const existingCats = await getCategoriesFromFirestore();
+    if (existingCats.length === 0) {
+      console.log('Seeding initial categories...');
+      const initialCats: DBCategory[] = [
+        { id: 'c1', name: 'Steamed Momos', icon: 'soup', description: 'Freshly steamed delicate dumplings filled with seasoned ingredients', active: true },
+        { id: 'c2', name: 'Fried & Kurkure Momos', icon: 'sandwich', description: 'Crispy golden fried momos with crunchy outer crust', active: true },
+        { id: 'c3', name: 'C Gravy & Chili Momos', icon: 'pizza', description: 'Tossed in rich spicy Indo-Chinese chili & garlic gravies', active: true },
+        { id: 'c4', name: 'Sides & Noodles', icon: 'salad', description: 'Hakka noodles, fried rice, and savory side dishes', active: true },
+        { id: 'c5', name: 'Refreshing Beverages', icon: 'glass-water', description: 'Chilled craft sodas, ice teas, and mocktails', active: true }
+      ];
+      fallbackCategories = [...initialCats];
+      for (const cat of initialCats) {
+        try {
+          await setDoc(doc(db, 'categories', cat.id), cat);
+        } catch (e) {}
+      }
+    }
+
+    // 3. Menu Items
+    const existingMenu = await getMenuItemsFromFirestore();
+    if (existingMenu.length === 0) {
+      console.log('Seeding initial menu items...');
+      const initialMenu: DBMenuItem[] = [
+        {
+          id: 'm1',
+          name: 'Classic Chicken Steamed Momo (10 pcs)',
+          description: 'Hand-crafted dumplings stuffed with juicy minced chicken, spring onions, and Himalayan herbs. Served with spicy tomato chutney.',
+          price: 120,
+          categoryId: 'c1',
+          image: 'https://images.unsplash.com/photo-1541696432-82c6da8ce7bf?auto=format&fit=crop&w=600&q=80',
+          isAvailable: true,
+          isFeatured: true,
+          discountPercent: 10,
+          createdAt: new Date().toISOString()
+        },
+        {
+          id: 'm2',
+          name: 'Paneer & Veg Steamed Momo (10 pcs)',
+          description: 'Delicate steamed wrappers packed with grated cottage cheese, cabbage, carrots, and subtle aromatic spices.',
+          price: 110,
+          categoryId: 'c1',
+          image: 'https://images.unsplash.com/photo-1625220194771-7ebdea0b70b9?auto=format&fit=crop&w=600&q=80',
+          isAvailable: true,
+          isFeatured: true,
+          discountPercent: 0,
+          createdAt: new Date().toISOString()
+        },
+        {
+          id: 'm3',
+          name: 'Crunchy Chicken Kurkure Momo',
+          description: 'Coated in a crispy spiced cornflake shell and deep fried until golden. Served with chili mayonnaise.',
+          price: 150,
+          categoryId: 'c2',
+          image: 'https://images.unsplash.com/photo-1534422298391-e4f8c172dddb?auto=format&fit=crop&w=600&q=80',
+          isAvailable: true,
+          isFeatured: true,
+          discountPercent: 5,
+          createdAt: new Date().toISOString()
+        },
+        {
+          id: 'm4',
+          name: 'Schezwan Chili Chicken Momo',
+          description: 'Deep-fried chicken momos wok-tossed in garlic Schezwan gravy, peppers, and scallions.',
+          price: 160,
+          categoryId: 'c3',
+          image: 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?auto=format&fit=crop&w=600&q=80',
+          isAvailable: true,
+          isFeatured: false,
+          discountPercent: 0,
+          createdAt: new Date().toISOString()
+        },
+        {
+          id: 'm5',
+          name: 'Special Veg Hakka Noodles',
+          description: 'Wok-tossed noodles with julienned vegetables, white pepper, and light soy sauce.',
+          price: 130,
+          categoryId: 'c4',
+          image: 'https://images.unsplash.com/photo-1585032226651-759b368d7246?auto=format&fit=crop&w=600&q=80',
+          isAvailable: true,
+          isFeatured: false,
+          discountPercent: 0,
+          createdAt: new Date().toISOString()
+        },
+        {
+          id: 'm6',
+          name: 'Chilled Lemon Mint Cooler',
+          description: 'Zesty lemon juice muddled with crushed garden mint and sparkling soda.',
+          price: 60,
+          categoryId: 'c5',
+          image: 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?auto=format&fit=crop&w=600&q=80',
+          isAvailable: true,
+          isFeatured: false,
+          discountPercent: 0,
+          createdAt: new Date().toISOString()
+        }
+      ];
+      fallbackMenuItems = [...initialMenu];
+      for (const item of initialMenu) {
+        try {
+          await setDoc(doc(db, 'menuItems', item.id), item);
+        } catch (e) {}
+      }
+    }
+
+    // 4. Default Users
+    const existingUsers = await getUsersFromFirestore();
+    if (existingUsers.length === 0) {
+      console.log('Seeding initial users...');
+      const initialUsers: DBUser[] = [
+        {
+          id: 'u1',
+          email: 'admin@dumplingdream.com',
+          name: 'Alex Admin',
+          role: 'admin',
+          passwordHash: 'admin123',
+          phone: '+91 9876543210',
+          address: 'Station Road, Sribhumi',
+          createdAt: new Date().toISOString()
+        },
+        {
+          id: 'u1_alt',
+          email: 'admin@restaurant.com',
+          name: 'Alex Admin',
+          role: 'admin',
+          passwordHash: 'admin123',
+          phone: '+91 9876543210',
+          address: 'Station Road, Sribhumi',
+          createdAt: new Date().toISOString()
+        },
+        {
+          id: 'u1_gmail',
+          email: 'admin@gmail.com',
+          name: 'Alex Admin',
+          role: 'admin',
+          passwordHash: 'admin123',
+          phone: '+91 9876543210',
+          address: 'Station Road, Sribhumi',
+          createdAt: new Date().toISOString()
+        },
+        {
+          id: 'u2',
+          email: 'delivery@dumplingdream.com',
+          name: 'Rider Roy',
+          role: 'delivery',
+          passwordHash: 'delivery123',
+          phone: '+91 9876543211',
+          address: 'Delivery Hub, Sribhumi',
+          createdAt: new Date().toISOString()
+        },
+        {
+          id: 'u2_alt',
+          email: 'delivery@restaurant.com',
+          name: 'Rider Roy',
+          role: 'delivery',
+          passwordHash: 'delivery123',
+          phone: '+91 9876543211',
+          address: 'Delivery Hub, Sribhumi',
+          createdAt: new Date().toISOString()
+        },
+        {
+          id: 'u3',
+          email: 'customer@restaurant.com',
+          name: 'Chris Customer',
+          role: 'customer',
+          passwordHash: 'customer123',
+          phone: '+91 9876543212',
+          address: '742 Main Terrace, Sribhumi',
+          landmark: 'Near Railway Station',
+          createdAt: new Date().toISOString()
+        },
+        {
+          id: 'u4',
+          email: 'pronotoshbhattacharjee@gmail.com',
+          name: 'Pronotosh Bhattacharjee',
+          role: 'customer',
+          passwordHash: 'customer123',
+          phone: '+91 9876543210',
+          address: 'Sribhumi',
+          createdAt: new Date().toISOString()
+        }
+      ];
+      fallbackUsers = [...initialUsers];
+      for (const u of initialUsers) {
+        try {
+          await setDoc(doc(db, 'users', u.id), u);
+        } catch (e) {}
+      }
+    }
+
+    console.log('Database initialization complete.');
+  } catch (err) {
+    console.error('Error seeding Firestore:', err);
+  }
+}
+
+// Run initial seed on start
+seedFirestoreIfEmpty();
+
+// REST API ENDPOINTS CONNECTED TO FIRESTORE
+
+// 1. Authentication
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const { email, password, firebaseUid } = req.body;
+    const cleanEmail = (email || '').trim().toLowerCase();
+    const cleanPassword = (password || '').trim();
+
+    const users = await getUsersFromFirestore();
+    let user = users.find(u => u.email.trim().toLowerCase() === cleanEmail);
+
+    // Fallback lookup in fallbackUsers if not yet present in Firestore
+    if (!user) {
+      user = fallbackUsers.find(u => u.email.trim().toLowerCase() === cleanEmail);
+    }
+
+    // If authenticated via Firebase Auth directly (firebaseUid exists) and not in user list yet:
+    if (!user && firebaseUid) {
+      const isSystemAdmin = cleanEmail.includes('admin') || cleanEmail === 'nathsujan991@gmail.com' || cleanEmail === 'pronotoshbhattacharjee@gmail.com';
+      user = {
+        id: firebaseUid,
+        email: cleanEmail,
+        name: isSystemAdmin ? 'Admin User' : cleanEmail.split('@')[0],
+        role: isSystemAdmin ? 'admin' : 'customer',
+        passwordHash: cleanPassword,
+        phone: '+91 9876543210',
+        address: 'Sribhumi',
+        createdAt: new Date().toISOString()
+      };
+      
+      // Persist user in Firestore and fallback
+      try {
+        await setDoc(doc(db, 'users', firebaseUid), user);
+      } catch (e) {}
+      fallbackUsers.push(user);
+    }
+
+    // Special auto-grant for default admin emails if database is newly initialized
+    if (!user && (cleanEmail === 'admin@dumplingdream.com' || cleanEmail === 'admin@restaurant.com' || cleanEmail === 'admin@gmail.com' || cleanEmail.startsWith('admin@')) && cleanPassword === 'admin123') {
+      user = {
+        id: 'u_admin_default',
+        email: cleanEmail,
         name: 'Alex Admin',
         role: 'admin',
         passwordHash: 'admin123',
-        phone: '+1 (555) 123-4567',
-        address: '100 Main Restaurant St',
-        createdAt: new Date().toISOString(),
-      },
-      {
-        id: 'u2',
-        email: 'delivery@restaurant.com',
-        name: 'Rider Roy',
-        role: 'delivery',
-        passwordHash: 'delivery123',
-        phone: '+1 (555) 987-6543',
-        address: '200 Delivery Hub Ave',
-        createdAt: new Date().toISOString(),
-      },
-      {
-        id: 'u3',
-        email: 'customer@restaurant.com',
-        name: 'Chris Customer',
-        role: 'customer',
-        passwordHash: 'customer123',
-        phone: '+1 (555) 444-5555',
-        address: '742 Evergreen Terrace',
-        landmark: 'Next to Springfield Mall',
-        createdAt: new Date().toISOString(),
-      }
-    ],
-    categories: [
-      { id: 'c1', name: 'Gourmet Burgers', icon: 'sandwich', description: 'Flame-grilled burgers crafted with premium beef and fresh toppings', active: true },
-      { id: 'c2', name: 'Artisanal Pizzas', icon: 'pizza', description: 'Wood-fired oven pizzas with house-made marinara and fresh mozzarella', active: true },
-      { id: 'c3', name: 'Sides & Sharing', icon: 'soup', description: 'Perfect companions to complete your meal', active: true },
-      { id: 'c4', name: 'Sinful Desserts', icon: 'cake', description: 'Sweet treats to end your dining experience on a high note', active: true },
-      { id: 'c5', name: 'Refreshing Drinks', icon: 'glass-water', description: 'Chilled craft sodas, mocktails, and iced coffee', active: true },
-      { id: 'c6', name: 'Nourishing Bowls', icon: 'salad', description: 'Fresh, organic salads and protein-packed grains', active: true }
-    ],
-    menuItems: [
-      {
-        id: 'm1',
-        name: 'The Vintage Cheeseburger',
-        description: 'Prime dry-aged beef patty, mature cheddar cheese, heirloom tomato, crisp butter lettuce, house burger sauce, toasted brioche bun.',
-        price: 14.99,
-        categoryId: 'c1',
-        image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=600&q=80',
-        isAvailable: true,
-        isFeatured: true,
-        discountPercent: 10,
-        createdAt: new Date().toISOString(),
-      },
-      {
-        id: 'm2',
-        name: 'Spicy Firehouse Chicken Burger',
-        description: 'Crispy buttermilk chicken breast, spicy habanero glaze, cooling slaw, pickled jalapeños, chipotle aioli, brioche bun.',
-        price: 15.49,
-        categoryId: 'c1',
-        image: 'https://images.unsplash.com/photo-1525059696034-4967a8e1dca2?auto=format&fit=crop&w=600&q=80',
-        isAvailable: true,
-        isFeatured: true,
-        discountPercent: 0,
-        createdAt: new Date().toISOString(),
-      },
-      {
-        id: 'm3',
-        name: 'Margherita Classica Pizza',
-        description: 'San Marzano tomato base, fresh buffalo mozzarella, aromatic basil leaves, extra virgin olive oil drizzle, hand-stretched thin crust.',
-        price: 16.99,
-        categoryId: 'c2',
-        image: 'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=600&q=80',
-        isAvailable: true,
-        isFeatured: true,
-        discountPercent: 0,
-        createdAt: new Date().toISOString(),
-      },
-      {
-        id: 'm4',
-        name: 'Double Pepperoni Supreme',
-        description: 'House tomato sauce, loaded with cup-and-char pepperoni, fontina cheese, oregano, hot honey finish.',
-        price: 18.99,
-        categoryId: 'c2',
-        image: 'https://images.unsplash.com/photo-1628840042765-356cda07504e?auto=format&fit=crop&w=600&q=80',
-        isAvailable: true,
-        isFeatured: false,
-        discountPercent: 15,
-        createdAt: new Date().toISOString(),
-      },
-      {
-        id: 'm5',
-        name: 'Crispy Sea Salt Fries',
-        description: 'Hand-cut russet potatoes fried to golden perfection, seasoned with sea salt and fresh rosemary sprigs. Served with truffle ketchup.',
-        price: 5.99,
-        categoryId: 'c3',
-        image: 'https://images.unsplash.com/photo-1573080496219-bb080dd4f877?auto=format&fit=crop&w=600&q=80',
-        isAvailable: true,
-        isFeatured: false,
-        discountPercent: 0,
-        createdAt: new Date().toISOString(),
-      },
-      {
-        id: 'm6',
-        name: 'Loaded Mozzarella Dippers',
-        description: 'Herb-crusted mozzarella blocks, gooey melted core. Served with warm spicy marinara dipping sauce.',
-        price: 8.49,
-        categoryId: 'c3',
-        image: 'https://images.unsplash.com/photo-1531749668029-2db88e4b76ce?auto=format&fit=crop&w=600&q=80',
-        isAvailable: true,
-        isFeatured: false,
-        discountPercent: 0,
-        createdAt: new Date().toISOString(),
-      },
-      {
-        id: 'm7',
-        name: 'Decadent Chocolate Lava Cake',
-        description: 'Warm, rich chocolate cake with a molten dark chocolate center. Served with a scoop of premium Madagascar vanilla bean ice cream.',
-        price: 9.99,
-        categoryId: 'c4',
-        image: 'https://images.unsplash.com/photo-1606313564200-e75d5e30476c?auto=format&fit=crop&w=600&q=80',
-        isAvailable: true,
-        isFeatured: true,
-        discountPercent: 0,
-        createdAt: new Date().toISOString(),
-      },
-      {
-        id: 'm8',
-        name: 'Wild Strawberry Cheesecake',
-        description: 'New York style baked cheesecake on a buttery graham cracker crust, topped with house-made wild strawberry compote.',
-        price: 8.99,
-        categoryId: 'c4',
-        image: 'https://images.unsplash.com/photo-1533134242443-d4fd215305ad?auto=format&fit=crop&w=600&q=80',
-        isAvailable: true,
-        isFeatured: false,
-        discountPercent: 0,
-        createdAt: new Date().toISOString(),
-      },
-      {
-        id: 'm9',
-        name: 'Fresh Mint Lime Mojito',
-        description: 'Refreshing blend of muddled garden mint, fresh lime wedges, organic cane sugar, sparkling water, over crushed ice.',
-        price: 5.49,
-        categoryId: 'c5',
-        image: 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?auto=format&fit=crop&w=600&q=80',
-        isAvailable: true,
-        isFeatured: false,
-        discountPercent: 0,
-        createdAt: new Date().toISOString(),
-      },
-      {
-        id: 'm10',
-        name: 'Iced Vanilla Bean Latte',
-        description: 'Double shot of organic espresso, cold milk, rich natural vanilla bean syrup, served over ice.',
-        price: 6.29,
-        categoryId: 'c5',
-        image: 'https://images.unsplash.com/photo-1517701604599-bb29b565090c?auto=format&fit=crop&w=600&q=80',
-        isAvailable: true,
-        isFeatured: false,
-        discountPercent: 0,
-        createdAt: new Date().toISOString(),
-      },
-      {
-        id: 'm11',
-        name: 'Classic Chicken Caesar Bowl',
-        description: 'Crisp romaine lettuce, flame-grilled chicken breast, garlic herb croutons, shaved parmigiano-reggiano, creamy caesar dressing.',
-        price: 13.99,
-        categoryId: 'c6',
-        image: 'https://images.unsplash.com/photo-1550304943-4f24f54ddde9?auto=format&fit=crop&w=600&q=80',
-        isAvailable: true,
-        isFeatured: false,
-        discountPercent: 0,
-        createdAt: new Date().toISOString(),
-      },
-      {
-        id: 'm12',
-        name: 'Quinoa Avocado Power Bowl',
-        description: 'Nutritious red quinoa, creamy hass avocado, cherry tomatoes, edamame, baby spinach, roasted sesame ginger dressing.',
-        price: 14.49,
-        categoryId: 'c6',
-        image: 'https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=600&q=80',
-        isAvailable: true,
-        isFeatured: true,
-        discountPercent: 5,
-        createdAt: new Date().toISOString(),
-      }
-    ],
-    orders: [
-      {
-        id: 'ORD-101',
-        customerId: 'u3',
-        customerName: 'Chris Customer',
-        customerPhone: '+1 (555) 444-5555',
-        deliveryAddress: '742 Evergreen Terrace',
-        landmark: 'Next to Springfield Mall',
-        notes: 'Please knock on the side door.',
-        items: [
-          { menuItemId: 'm1', name: 'The Vintage Cheeseburger', quantity: 1, price: 13.49, image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=600&q=80' },
-          { menuItemId: 'm5', name: 'Crispy Sea Salt Fries', quantity: 1, price: 5.99, image: 'https://images.unsplash.com/photo-1573080496219-bb080dd4f877?auto=format&fit=crop&w=600&q=80' }
-        ],
-        subtotal: 19.48,
-        deliveryCharge: 3.99,
-        tax: 1.56,
-        total: 25.03,
-        status: 'Delivered',
-        deliveryBoyId: 'u2',
-        deliveryBoyName: 'Rider Roy',
-        createdAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-        updatedAt: new Date(Date.now() - 23.5 * 60 * 60 * 1000).toISOString(),
-      },
-      {
-        id: 'ORD-102',
-        customerId: 'u3',
-        customerName: 'Chris Customer',
-        customerPhone: '+1 (555) 444-5555',
-        deliveryAddress: '742 Evergreen Terrace',
-        landmark: 'Next to Springfield Mall',
-        notes: 'Leave at door.',
-        items: [
-          { menuItemId: 'm3', name: 'Margherita Classica Pizza', quantity: 2, price: 16.99, image: 'https://images.unsplash.com/photo-1513104890138-7c749659a591?auto=format&fit=crop&w=600&q=80' }
-        ],
-        subtotal: 33.98,
-        deliveryCharge: 3.99,
-        tax: 2.72,
-        total: 40.69,
-        status: 'Pending',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      }
-    ],
-    settings: {
-      restaurantName: 'The Gourmet Craft',
-      logo: 'https://images.unsplash.com/photo-1498654896293-37aacf113fd9?auto=format&fit=crop&w=150&h=150&q=80',
-      banner: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1200&q=80',
-      address: '123 Epicurean Boulevard, Gastronomy Plaza',
-      phone: '+1 (555) 500-2026',
-      email: 'hello@gourmetcraft.com',
-      deliveryCharge: 3.99,
-      minOrder: 10.00,
-      openingHours: '10:00 AM',
-      closingHours: '10:00 PM',
-      facebookUrl: 'https://facebook.com/gourmetcraft',
-      twitterUrl: 'https://twitter.com/gourmetcraft',
-      instagramUrl: 'https://instagram.com/gourmetcraft',
-      aboutSection: 'Welcome to The Gourmet Craft, where we combine chef-driven flavor curation with prime hand-selected ingredients. Our wood-fired ovens and signature flame grills ensure that every dish served is a masterpiece of culinary artisanry.',
-      contactEmail: 'support@gourmetcraft.com',
-      contactPhone: '+1 (555) 500-2027',
-    },
-    notifications: [
-      {
-        id: 'n1',
-        title: 'New Order Placed',
-        message: 'Order ORD-102 has been placed by Chris Customer.',
-        type: 'info',
-        createdAt: new Date().toISOString(),
-        read: false,
-        orderId: 'ORD-102'
-      }
-    ]
-  };
+        phone: '+91 9876543210',
+        address: 'Station Road, Sribhumi',
+        createdAt: new Date().toISOString()
+      };
+    }
 
-  fs.writeFileSync(dbPath, JSON.stringify(initialData, null, 2), 'utf-8');
-}
+    // Validation: Require correct password if not authenticated via Firebase Auth directly
+    if (!user || (!firebaseUid && user.passwordHash !== cleanPassword)) {
+      return res.status(401).json({ error: 'Invalid email or password.' });
+    }
 
-initializeDatabase();
+    const token = `firebase-token-${user.id}-${Date.now()}`;
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        approvalStatus: user.approvalStatus || 'approved',
+        phone: user.phone,
+        address: user.address,
+        landmark: user.landmark,
+        vehicleType: user.vehicleType,
+        licenseNumber: user.licenseNumber,
+        createdAt: user.createdAt
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Authentication failed.' });
+  }
+});
 
-// Helper functions to read/write DB
-function readDb(): DBSchema {
+app.post('/api/auth/register', async (req, res) => {
   try {
-    const raw = fs.readFileSync(dbPath, 'utf-8');
-    return JSON.parse(raw);
-  } catch (error) {
-    console.error('Error reading DB, reinitializing:', error);
-    initializeDatabase();
-    return JSON.parse(fs.readFileSync(dbPath, 'utf-8'));
-  }
-}
+    const { name, email, password, phone, address, landmark } = req.body;
+    const users = await getUsersFromFirestore();
 
-function writeDb(data: DBSchema) {
-  fs.writeFileSync(dbPath, JSON.stringify(data, null, 2), 'utf-8');
-}
-
-// REST API Endpoints
-
-// Authentication
-app.post('/api/auth/login', (req, res) => {
-  const { email, password } = req.body;
-  const db = readDb();
-  const user = db.users.find(u => u.email.toLowerCase() === email.toLowerCase());
-
-  if (!user || user.passwordHash !== password) {
-    return res.status(401).json({ error: 'Invalid email or password.' });
-  }
-
-  const token = `mock-token-${user.id}-${Date.now()}`;
-  res.json({
-    token,
-    user: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      phone: user.phone,
-      address: user.address,
-      landmark: user.landmark,
-      createdAt: user.createdAt
+    if (users.some(u => u.email.toLowerCase() === email.toLowerCase())) {
+      return res.status(400).json({ error: 'Email is already registered.' });
     }
-  });
+
+    const userId = `u${Date.now()}`;
+    const newUser: DBUser = {
+      id: userId,
+      email,
+      name,
+      role: 'customer',
+      approvalStatus: 'approved',
+      passwordHash: password,
+      phone,
+      address,
+      landmark,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    try {
+      await setDoc(doc(db, 'users', userId), newUser);
+    } catch (e) {
+      console.warn('Firestore user write fallback notice:', e instanceof Error ? e.message : e);
+    }
+    fallbackUsers.push(newUser);
+
+    const token = `firebase-token-${newUser.id}-${Date.now()}`;
+    res.status(201).json({
+      token,
+      user: {
+        id: newUser.id,
+        email: newUser.email,
+        name: newUser.name,
+        role: newUser.role,
+        approvalStatus: newUser.approvalStatus,
+        phone: newUser.phone,
+        address: newUser.address,
+        landmark: newUser.landmark,
+        createdAt: newUser.createdAt
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Registration failed.' });
+  }
 });
 
-app.post('/api/auth/register', (req, res) => {
-  const { name, email, password, phone, address, landmark } = req.body;
-  const db = readDb();
+// Register Delivery Partner Endpoint
+app.post('/api/auth/register-delivery', async (req, res) => {
+  try {
+    const { name, email, password, phone, address, vehicleType, licenseNumber } = req.body;
+    const users = await getUsersFromFirestore();
 
-  if (db.users.some(u => u.email.toLowerCase() === email.toLowerCase())) {
-    return res.status(400).json({ error: 'Email is already registered.' });
-  }
-
-  const newUser: DBUser = {
-    id: `u${Date.now()}`,
-    email,
-    name,
-    role: 'customer',
-    passwordHash: password,
-    phone,
-    address,
-    landmark,
-    createdAt: new Date().toISOString()
-  };
-
-  db.users.push(newUser);
-  writeDb(db);
-
-  const token = `mock-token-${newUser.id}-${Date.now()}`;
-  res.json({
-    token,
-    user: {
-      id: newUser.id,
-      email: newUser.email,
-      name: newUser.name,
-      role: newUser.role,
-      phone: newUser.phone,
-      address: newUser.address,
-      landmark: newUser.landmark,
-      createdAt: newUser.createdAt
+    if (users.some(u => u.email.toLowerCase() === email.toLowerCase())) {
+      return res.status(400).json({ error: 'Email is already registered.' });
     }
-  });
+
+    const userId = `u_del_${Date.now()}`;
+    const newUser: DBUser = {
+      id: userId,
+      email,
+      name,
+      role: 'delivery',
+      approvalStatus: 'pending',
+      passwordHash: password,
+      phone,
+      address,
+      vehicleType: vehicleType || 'Bike',
+      licenseNumber: licenseNumber || '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    try {
+      await setDoc(doc(db, 'users', userId), newUser);
+    } catch (e) {
+      console.warn('Firestore user write fallback notice:', e instanceof Error ? e.message : e);
+    }
+    fallbackUsers.push(newUser);
+
+    res.status(201).json({
+      message: 'Delivery partner registration submitted successfully! Your account is pending admin approval.',
+      user: {
+        id: newUser.id,
+        email: newUser.email,
+        name: newUser.name,
+        role: newUser.role,
+        approvalStatus: newUser.approvalStatus,
+        phone: newUser.phone,
+        address: newUser.address,
+        vehicleType: newUser.vehicleType,
+        licenseNumber: newUser.licenseNumber,
+        createdAt: newUser.createdAt
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Delivery partner registration failed.' });
+  }
 });
 
-app.post('/api/auth/forgot-password', (req, res) => {
-  const { email, newPassword } = req.body;
-  const db = readDb();
-  const userIndex = db.users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
+// Admin endpoint to approve or reject delivery partner
+app.post('/api/admin/delivery-partners/approve', async (req, res) => {
+  try {
+    const { userId, status } = req.body;
+    if (!userId || !['approved', 'rejected', 'pending'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid parameters.' });
+    }
 
-  if (userIndex === -1) {
-    return res.status(404).json({ error: 'No user found with this email.' });
+    try {
+      await updateDoc(doc(db, 'users', userId), {
+        approvalStatus: status,
+        updatedAt: new Date().toISOString()
+      });
+    } catch (e) {}
+
+    const targetUser = fallbackUsers.find(u => u.id === userId);
+    if (targetUser) {
+      targetUser.approvalStatus = status;
+    }
+
+    res.json({ message: `Delivery partner status updated to ${status}.` });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update approval status.' });
   }
+});
 
-  db.users[userIndex].passwordHash = newPassword || 'customer123';
-  writeDb(db);
-  res.json({ message: 'Password reset successfully!' });
+// Admin endpoint to create new admin accounts
+app.post('/api/admin/create-admin', async (req, res) => {
+  try {
+    const { name, email, password, phone } = req.body;
+    if (!name || !email || !password) {
+      return res.status(400).json({ error: 'Name, email and password are required.' });
+    }
+
+    const users = await getUsersFromFirestore();
+    if (users.some(u => u.email.toLowerCase() === email.toLowerCase())) {
+      return res.status(400).json({ error: 'Email is already registered.' });
+    }
+
+    const userId = `u_admin_${Date.now()}`;
+    const newAdmin: DBUser = {
+      id: userId,
+      email,
+      name,
+      role: 'admin',
+      approvalStatus: 'approved',
+      passwordHash: password,
+      phone: phone || '',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    try {
+      await setDoc(doc(db, 'users', userId), newAdmin);
+    } catch (e) {}
+    fallbackUsers.push(newAdmin);
+
+    res.status(201).json({
+      message: 'New admin account created successfully.',
+      user: {
+        id: newAdmin.id,
+        email: newAdmin.email,
+        name: newAdmin.name,
+        role: newAdmin.role,
+        approvalStatus: newAdmin.approvalStatus,
+        phone: newAdmin.phone,
+        createdAt: newAdmin.createdAt
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to create admin account.' });
+  }
+});
+
+app.post('/api/auth/forgot-password', async (req, res) => {
+  try {
+    const { email, newPassword } = req.body;
+    const users = await getUsersFromFirestore();
+    const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+
+    if (!user) {
+      return res.status(404).json({ error: 'No user found with this email.' });
+    }
+
+    await updateDoc(doc(db, 'users', user.id), {
+      passwordHash: newPassword || 'customer123',
+      updatedAt: new Date().toISOString()
+    });
+
+    res.json({ message: 'Password reset successfully!' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to reset password.' });
+  }
+});
+
+// User Management (Admin)
+app.get('/api/users', async (req, res) => {
+  try {
+    const users = await getUsersFromFirestore();
+    const sanitized = users.map(({ passwordHash, ...u }) => u);
+    res.json(sanitized);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch users.' });
+  }
 });
 
 // Categories CRUD
-app.get('/api/categories', (req, res) => {
-  const db = readDb();
-  res.json(db.categories);
+app.get('/api/categories', async (req, res) => {
+  try {
+    const categories = await getCategoriesFromFirestore();
+    res.json(categories);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch categories.' });
+  }
 });
 
-app.post('/api/categories', (req, res) => {
-  const { name, icon, description } = req.body;
-  const db = readDb();
-  const newCategory: DBCategory = {
-    id: `c${Date.now()}`,
-    name,
-    icon: icon || 'soup',
-    description: description || '',
-    active: true
-  };
-  db.categories.push(newCategory);
-  writeDb(db);
-  res.status(201).json(newCategory);
+app.post('/api/categories', async (req, res) => {
+  try {
+    const { name, icon, description } = req.body;
+    const id = `c${Date.now()}`;
+    const newCategory: DBCategory = {
+      id,
+      name,
+      icon: icon || 'soup',
+      description: description || '',
+      active: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    try {
+      await setDoc(doc(db, 'categories', id), newCategory);
+    } catch (e) {
+      console.warn('Firestore category write fallback notice:', e instanceof Error ? e.message : e);
+    }
+    fallbackCategories.push(newCategory);
+    res.status(201).json(newCategory);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to create category.' });
+  }
 });
 
-app.put('/api/categories/:id', (req, res) => {
-  const { id } = req.params;
-  const { name, icon, description, active } = req.body;
-  const db = readDb();
-  const index = db.categories.findIndex(c => c.id === id);
+app.put('/api/categories/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, icon, description, active } = req.body;
+    const updateData: Partial<DBCategory> = { updatedAt: new Date().toISOString() };
+    if (name !== undefined) updateData.name = name;
+    if (icon !== undefined) updateData.icon = icon;
+    if (description !== undefined) updateData.description = description;
+    if (active !== undefined) updateData.active = active;
 
-  if (index === -1) return res.status(404).json({ error: 'Category not found.' });
+    try {
+      await updateDoc(doc(db, 'categories', id), updateData);
+    } catch (e) {
+      console.warn('Firestore category update fallback notice:', e instanceof Error ? e.message : e);
+    }
 
-  db.categories[index] = {
-    ...db.categories[index],
-    name: name !== undefined ? name : db.categories[index].name,
-    icon: icon !== undefined ? icon : db.categories[index].icon,
-    description: description !== undefined ? description : db.categories[index].description,
-    active: active !== undefined ? active : db.categories[index].active
-  };
-
-  writeDb(db);
-  res.json(db.categories[index]);
+    const idx = fallbackCategories.findIndex(c => c.id === id);
+    if (idx !== -1) {
+      fallbackCategories[idx] = { ...fallbackCategories[idx], ...updateData };
+      res.json(fallbackCategories[idx]);
+    } else {
+      res.json({ id, ...updateData });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update category.' });
+  }
 });
 
-app.delete('/api/categories/:id', (req, res) => {
-  const { id } = req.params;
-  const db = readDb();
-  db.categories = db.categories.filter(c => c.id !== id);
-  // Also delete associated menu items
-  db.menuItems = db.menuItems.filter(m => m.categoryId !== id);
-  writeDb(db);
-  res.json({ message: 'Category deleted successfully.' });
+app.delete('/api/categories/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    try {
+      await deleteDoc(doc(db, 'categories', id));
+    } catch (e) {
+      console.warn('Firestore category delete fallback notice:', e instanceof Error ? e.message : e);
+    }
+    fallbackCategories = fallbackCategories.filter(c => c.id !== id);
+    res.json({ message: 'Category deleted successfully.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete category.' });
+  }
 });
 
 // Menu Items CRUD
-app.get('/api/menu', (req, res) => {
-  const db = readDb();
-  res.json(db.menuItems);
+app.get('/api/menu', async (req, res) => {
+  try {
+    const menuItems = await getMenuItemsFromFirestore();
+    res.json(menuItems);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch menu items.' });
+  }
 });
 
-app.post('/api/menu', (req, res) => {
-  const { name, description, price, categoryId, image, isAvailable, isFeatured, discountPercent } = req.body;
-  const db = readDb();
-  const newItem: DBMenuItem = {
-    id: `m${Date.now()}`,
-    name,
-    description,
-    price: Number(price) || 0,
-    categoryId,
-    image: image || 'https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80',
-    isAvailable: isAvailable !== undefined ? isAvailable : true,
-    isFeatured: isFeatured !== undefined ? isFeatured : false,
-    discountPercent: Number(discountPercent) || 0,
-    createdAt: new Date().toISOString()
-  };
-  db.menuItems.push(newItem);
-  writeDb(db);
-  res.status(201).json(newItem);
+app.post('/api/menu', async (req, res) => {
+  try {
+    const { name, description, price, categoryId, image, isAvailable, isFeatured, discountPercent } = req.body;
+    const id = `m${Date.now()}`;
+    const newItem: DBMenuItem = {
+      id,
+      name,
+      description: description || '',
+      price: Number(price) || 0,
+      categoryId,
+      image: image || 'https://images.unsplash.com/photo-1541696432-82c6da8ce7bf?auto=format&fit=crop&w=600&q=80',
+      isAvailable: isAvailable !== undefined ? isAvailable : true,
+      isFeatured: isFeatured !== undefined ? isFeatured : false,
+      discountPercent: Number(discountPercent) || 0,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    try {
+      await setDoc(doc(db, 'menuItems', id), newItem);
+    } catch (e) {
+      console.warn('Firestore menu write fallback notice:', e instanceof Error ? e.message : e);
+    }
+    fallbackMenuItems.push(newItem);
+    res.status(201).json(newItem);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to add menu item.' });
+  }
 });
 
-app.put('/api/menu/:id', (req, res) => {
-  const { id } = req.params;
-  const db = readDb();
-  const index = db.menuItems.findIndex(m => m.id === id);
+app.put('/api/menu/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description, price, categoryId, image, isAvailable, isFeatured, discountPercent } = req.body;
+    const updateData: Record<string, any> = { updatedAt: new Date().toISOString() };
 
-  if (index === -1) return res.status(404).json({ error: 'Menu item not found.' });
+    if (name !== undefined) updateData.name = name;
+    if (description !== undefined) updateData.description = description;
+    if (price !== undefined) updateData.price = Number(price);
+    if (categoryId !== undefined) updateData.categoryId = categoryId;
+    if (image !== undefined) updateData.image = image;
+    if (isAvailable !== undefined) updateData.isAvailable = isAvailable;
+    if (isFeatured !== undefined) updateData.isFeatured = isFeatured;
+    if (discountPercent !== undefined) updateData.discountPercent = Number(discountPercent);
 
-  const { name, description, price, categoryId, image, isAvailable, isFeatured, discountPercent } = req.body;
+    try {
+      await updateDoc(doc(db, 'menuItems', id), updateData);
+    } catch (e) {
+      console.warn('Firestore menu update fallback notice:', e instanceof Error ? e.message : e);
+    }
 
-  db.menuItems[index] = {
-    ...db.menuItems[index],
-    name: name !== undefined ? name : db.menuItems[index].name,
-    description: description !== undefined ? description : db.menuItems[index].description,
-    price: price !== undefined ? Number(price) : db.menuItems[index].price,
-    categoryId: categoryId !== undefined ? categoryId : db.menuItems[index].categoryId,
-    image: image !== undefined ? image : db.menuItems[index].image,
-    isAvailable: isAvailable !== undefined ? isAvailable : db.menuItems[index].isAvailable,
-    isFeatured: isFeatured !== undefined ? isFeatured : db.menuItems[index].isFeatured,
-    discountPercent: discountPercent !== undefined ? Number(discountPercent) : db.menuItems[index].discountPercent
-  };
-
-  writeDb(db);
-  res.json(db.menuItems[index]);
+    const idx = fallbackMenuItems.findIndex(m => m.id === id);
+    if (idx !== -1) {
+      fallbackMenuItems[idx] = { ...fallbackMenuItems[idx], ...updateData };
+      res.json(fallbackMenuItems[idx]);
+    } else {
+      res.json({ id, ...updateData });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update menu item.' });
+  }
 });
 
-app.delete('/api/menu/:id', (req, res) => {
-  const { id } = req.params;
-  const db = readDb();
-  db.menuItems = db.menuItems.filter(m => m.id !== id);
-  writeDb(db);
-  res.json({ message: 'Menu item deleted successfully.' });
+app.delete('/api/menu/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    try {
+      await deleteDoc(doc(db, 'menuItems', id));
+    } catch (e) {
+      console.warn('Firestore menu delete fallback notice:', e instanceof Error ? e.message : e);
+    }
+    fallbackMenuItems = fallbackMenuItems.filter(m => m.id !== id);
+    res.json({ message: 'Menu item deleted successfully.' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete menu item.' });
+  }
 });
 
 // Restaurant Settings
-app.get('/api/settings', (req, res) => {
-  const db = readDb();
-  res.json(db.settings);
+app.get('/api/settings', async (req, res) => {
+  try {
+    const settings = await getSettingsFromFirestore();
+    res.json(settings);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch restaurant settings.' });
+  }
 });
 
-app.put('/api/settings', (req, res) => {
-  const db = readDb();
-  db.settings = { ...db.settings, ...req.body };
-  writeDb(db);
-  res.json(db.settings);
+app.put('/api/settings', async (req, res) => {
+  try {
+    try {
+      await setDoc(doc(db, 'restaurantSettings', 'default'), req.body, { merge: true });
+    } catch (e) {
+      console.warn('Firestore settings update fallback notice:', e instanceof Error ? e.message : e);
+    }
+    const updated = await getSettingsFromFirestore();
+    res.json(updated);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update restaurant settings.' });
+  }
 });
 
 // Orders
-app.get('/api/orders', (req, res) => {
-  const db = readDb();
-  const { userId, role } = req.query;
+app.get('/api/orders', async (req, res) => {
+  try {
+    const { userId, role } = req.query;
+    let orders = await getOrdersFromFirestore();
 
-  let filteredOrders = db.orders;
-
-  if (role === 'customer' && userId) {
-    filteredOrders = db.orders.filter(o => o.customerId === userId);
-  } else if (role === 'delivery' && userId) {
-    filteredOrders = db.orders.filter(o => o.deliveryBoyId === userId);
-  }
-
-  // Sort orders descending by date
-  filteredOrders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  res.json(filteredOrders);
-});
-
-app.post('/api/orders', (req, res) => {
-  const { customerId, customerName, customerPhone, deliveryAddress, landmark, notes, items, subtotal, deliveryCharge, tax, total } = req.body;
-  const db = readDb();
-
-  const newOrder: DBOrder = {
-    id: `ORD-${Math.floor(100000 + Math.random() * 900000)}`,
-    customerId,
-    customerName,
-    customerPhone,
-    deliveryAddress,
-    landmark,
-    notes,
-    items,
-    subtotal: Number(subtotal),
-    deliveryCharge: Number(deliveryCharge),
-    tax: Number(tax),
-    total: Number(total),
-    status: 'Pending',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
-
-  db.orders.push(newOrder);
-
-  // Send admin notification
-  const newNotif: DBNotification = {
-    id: `n${Date.now()}`,
-    title: 'New Order Received',
-    message: `Order ${newOrder.id} of $${newOrder.total.toFixed(2)} placed by ${customerName}.`,
-    type: 'info',
-    createdAt: new Date().toISOString(),
-    read: false,
-    orderId: newOrder.id
-  };
-  db.notifications.push(newNotif);
-
-  writeDb(db);
-  res.status(201).json(newOrder);
-});
-
-app.put('/api/orders/:id', (req, res) => {
-  const { id } = req.params;
-  const { status, deliveryBoyId, deliveryBoyName } = req.body;
-  const db = readDb();
-  const index = db.orders.findIndex(o => o.id === id);
-
-  if (index === -1) return res.status(404).json({ error: 'Order not found.' });
-
-  const oldOrder = db.orders[index];
-  const originalStatus = oldOrder.status;
-
-  db.orders[index] = {
-    ...oldOrder,
-    status: status !== undefined ? status : oldOrder.status,
-    deliveryBoyId: deliveryBoyId !== undefined ? deliveryBoyId : oldOrder.deliveryBoyId,
-    deliveryBoyName: deliveryBoyName !== undefined ? deliveryBoyName : oldOrder.deliveryBoyName,
-    updatedAt: new Date().toISOString()
-  };
-
-  // Add Notification for user
-  if (status && status !== originalStatus) {
-    let title = `Order ${status}`;
-    let message = `Your order ${id} status has been updated to ${status}.`;
-    let type: 'info' | 'success' | 'warning' = 'info';
-
-    if (status === 'Accepted') {
-      title = 'Order Accepted';
-      message = `Hurrah! Gourmet Craft has accepted your order ${id}.`;
-      type = 'success';
-    } else if (status === 'Preparing') {
-      title = 'Preparing Food';
-      message = `Our expert chefs are cooking your fresh meal for order ${id}.`;
-    } else if (status === 'Ready') {
-      title = 'Order Ready';
-      message = `Your order ${id} is ready for pick-up or dispatch!`;
-      type = 'success';
-    } else if (status === 'Out for Delivery') {
-      title = 'Out for Delivery';
-      message = `Our delivery hero ${db.orders[index].deliveryBoyName || 'Roy'} is heading your way with order ${id}!`;
-    } else if (status === 'Delivered') {
-      title = 'Order Delivered';
-      message = `Order ${id} was marked delivered. Enjoy your meal!`;
-      type = 'success';
-    } else if (status === 'Cancelled') {
-      title = 'Order Cancelled';
-      message = `Order ${id} was cancelled.`;
-      type = 'warning';
+    if (role === 'customer' && userId) {
+      orders = orders.filter(o => o.customerId === userId);
+    } else if (role === 'delivery' && userId) {
+      orders = orders.filter(o => o.deliveryBoyId === userId);
     }
 
-    const customerNotif: DBNotification = {
-      id: `n${Date.now()}`,
-      title,
-      message,
-      type,
-      createdAt: new Date().toISOString(),
-      read: false,
-      orderId: id,
-      userId: oldOrder.customerId
-    };
-    db.notifications.push(customerNotif);
+    orders.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    res.json(orders);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch orders.' });
   }
+});
 
-  // Delivery partner assignment notification
-  if (deliveryBoyId && deliveryBoyId !== oldOrder.deliveryBoyId) {
-    const deliveryNotif: DBNotification = {
-      id: `n${Date.now() + 1}`,
-      title: 'New Delivery Assigned',
-      message: `You have been assigned order ${id} for delivery.`,
+app.post('/api/orders', async (req, res) => {
+  try {
+    const { customerId, customerName, customerPhone, deliveryAddress, landmark, notes, items, subtotal, deliveryCharge, tax, total, paymentMethod } = req.body;
+
+    const orderId = `ORD-${Math.floor(100000 + Math.random() * 900000)}`;
+    const newOrder: DBOrder = {
+      id: orderId,
+      customerId,
+      customerName,
+      customerPhone,
+      deliveryAddress,
+      landmark: landmark || '',
+      notes: notes || '',
+      items,
+      subtotal: Number(subtotal),
+      deliveryCharge: Number(deliveryCharge),
+      tax: Number(tax),
+      total: Number(total),
+      paymentMethod: paymentMethod === 'online' ? 'online' : 'cod',
+      paymentStatus: 'pending',
+      status: 'Pending',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    try {
+      await setDoc(doc(db, 'orders', orderId), newOrder);
+    } catch (e) {
+      console.warn('Firestore order write fallback notice:', e instanceof Error ? e.message : e);
+    }
+    fallbackOrders.unshift(newOrder);
+
+    // Create Notification
+    const notifId = `n${Date.now()}`;
+    const newNotif: DBNotification = {
+      id: notifId,
+      title: 'New COD Order Received',
+      message: `Order ${orderId} of ₹${newOrder.total.toFixed(2)} placed by ${customerName}.`,
       type: 'info',
       createdAt: new Date().toISOString(),
       read: false,
-      orderId: id,
-      userId: deliveryBoyId
+      orderId
     };
-    db.notifications.push(deliveryNotif);
-  }
+    try {
+      await setDoc(doc(db, 'notifications', notifId), newNotif);
+    } catch (e) {
+      console.warn('Firestore notification write fallback notice:', e instanceof Error ? e.message : e);
+    }
+    fallbackNotifications.unshift(newNotif);
 
-  writeDb(db);
-  res.json(db.orders[index]);
+    res.status(201).json(newOrder);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to place order.' });
+  }
+});
+
+app.put('/api/orders/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, deliveryBoyId, deliveryBoyName, paymentStatus } = req.body;
+    
+    let oldOrder: DBOrder | undefined;
+    try {
+      const docSnap = await getDoc(doc(db, 'orders', id));
+      if (docSnap.exists()) {
+        oldOrder = docSnap.data() as DBOrder;
+      }
+    } catch (e) {}
+
+    if (!oldOrder) {
+      oldOrder = fallbackOrders.find(o => o.id === id);
+    }
+
+    if (!oldOrder) {
+      return res.status(404).json({ error: 'Order not found.' });
+    }
+
+    const updateData: Record<string, any> = { updatedAt: new Date().toISOString() };
+
+    if (status !== undefined) updateData.status = status;
+    if (deliveryBoyId !== undefined) updateData.deliveryBoyId = deliveryBoyId;
+    if (deliveryBoyName !== undefined) updateData.deliveryBoyName = deliveryBoyName;
+    if (paymentStatus !== undefined) updateData.paymentStatus = paymentStatus;
+
+    if (status === 'Delivered') {
+      updateData.paymentStatus = 'completed';
+    }
+
+    try {
+      await updateDoc(doc(db, 'orders', id), updateData);
+    } catch (e) {
+      console.warn('Firestore order update fallback notice:', e instanceof Error ? e.message : e);
+    }
+
+    const idx = fallbackOrders.findIndex(o => o.id === id);
+    if (idx !== -1) {
+      fallbackOrders[idx] = { ...fallbackOrders[idx], ...updateData };
+    }
+
+    // Add Notification
+    if (status && status !== oldOrder.status) {
+      let title = `Order ${status}`;
+      let message = `Your order ${id} status has been updated to ${status}.`;
+      let type: 'info' | 'success' | 'warning' = 'info';
+
+      if (status === 'Accepted') {
+        title = 'Order Accepted';
+        message = `Dumpling Dream has accepted your order ${id}!`;
+        type = 'success';
+      } else if (status === 'Preparing') {
+        title = 'Preparing Dumplings';
+        message = `Our expert chefs are steaming your delicious momos for order ${id}.`;
+      } else if (status === 'Ready') {
+        title = 'Order Ready for Pickup/Dispatch';
+        message = `Your order ${id} is cooked and ready!`;
+        type = 'success';
+      } else if (status === 'Out for Delivery') {
+        title = 'Out for Delivery';
+        message = `Rider ${deliveryBoyName || oldOrder.deliveryBoyName || 'Roy'} is on the way with order ${id}!`;
+      } else if (status === 'Delivered') {
+        title = 'Order Delivered';
+        message = `Order ${id} was delivered. Enjoy your hot momos!`;
+        type = 'success';
+      } else if (status === 'Cancelled') {
+        title = 'Order Cancelled';
+        message = `Order ${id} has been cancelled.`;
+        type = 'warning';
+      }
+
+      const notifId = `n${Date.now()}`;
+      const newNotif: DBNotification = {
+        id: notifId,
+        title,
+        message,
+        type,
+        createdAt: new Date().toISOString(),
+        read: false,
+        orderId: id,
+        userId: oldOrder.customerId
+      };
+      try {
+        await setDoc(doc(db, 'notifications', notifId), newNotif);
+      } catch (e) {
+        console.warn('Firestore notification fallback notice:', e instanceof Error ? e.message : e);
+      }
+      fallbackNotifications.unshift(newNotif);
+    }
+
+    res.json({ id, ...oldOrder, ...updateData });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update order.' });
+  }
 });
 
 // Notifications
-app.get('/api/notifications', (req, res) => {
-  const { userId } = req.query;
-  const db = readDb();
+app.get('/api/notifications', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    let notifs = await getNotificationsFromFirestore();
 
-  let userNotifs = db.notifications;
-  if (userId) {
-    // Show user-specific notifications AND admin notifications (if they are admin)
-    const user = db.users.find(u => u.id === userId);
-    if (user) {
-      if (user.role === 'admin') {
-        // Admin sees admin notifications (no specific userId) and direct ones
-        userNotifs = db.notifications.filter(n => !n.userId || n.userId === userId);
-      } else {
-        // Customer or Delivery partner sees only their specific notifications
-        userNotifs = db.notifications.filter(n => n.userId === userId);
-      }
-    }
-  } else {
-    // Default fallback
-    userNotifs = db.notifications.filter(n => !n.userId);
-  }
-
-  // Sort descending
-  userNotifs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  res.json(userNotifs);
-});
-
-app.post('/api/notifications/read-all', (req, res) => {
-  const { userId } = req.body;
-  const db = readDb();
-
-  db.notifications.forEach(n => {
     if (userId) {
-      if (n.userId === userId || (!n.userId && userId === 'u1')) {
-        n.read = true;
+      const users = await getUsersFromFirestore();
+      const user = users.find(u => u.id === userId);
+      if (user) {
+        if (user.role === 'admin') {
+          notifs = notifs.filter(n => !n.userId || n.userId === userId);
+        } else {
+          notifs = notifs.filter(n => n.userId === userId);
+        }
       }
     } else {
-      n.read = true;
+      notifs = notifs.filter(n => !n.userId);
     }
-  });
 
-  writeDb(db);
-  res.json({ success: true });
+    notifs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    res.json(notifs);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch notifications.' });
+  }
+});
+
+app.post('/api/notifications/read-all', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    const notifs = await getNotificationsFromFirestore();
+    for (const n of notifs) {
+      if (!n.read) {
+        if (!userId || n.userId === userId || (!n.userId && userId === 'u1')) {
+          await updateDoc(doc(db, 'notifications', n.id), { read: true });
+        }
+      }
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to mark notifications read.' });
+  }
 });
 
 // Dashboard Analytics
-app.get('/api/dashboard-stats', (req, res) => {
-  const db = readDb();
-  const orders = db.orders;
+app.get('/api/dashboard-stats', async (req, res) => {
+  try {
+    const orders = await getOrdersFromFirestore();
+    const users = await getUsersFromFirestore();
 
-  const totalOrders = orders.length;
-  const totalRevenue = orders
-    .filter(o => o.status === 'Delivered')
-    .reduce((sum, o) => sum + o.total, 0);
+    const totalOrders = orders.length;
+    const totalRevenue = orders
+      .filter(o => o.status === 'Delivered')
+      .reduce((sum, o) => sum + o.total, 0);
 
-  // Calculate Today's Revenue (assuming all matching date)
-  const todayStr = new Date().toISOString().split('T')[0];
-  const todayRevenue = orders
-    .filter(o => o.status === 'Delivered' && o.createdAt.startsWith(todayStr))
-    .reduce((sum, o) => sum + o.total, 0);
+    const todayStr = new Date().toISOString().split('T')[0];
+    const todayRevenue = orders
+      .filter(o => o.status === 'Delivered' && o.createdAt.startsWith(todayStr))
+      .reduce((sum, o) => sum + o.total, 0);
 
-  const pendingOrdersCount = orders.filter(o => o.status !== 'Delivered' && o.status !== 'Cancelled').length;
-  const completedOrdersCount = orders.filter(o => o.status === 'Delivered').length;
-  const customersCount = db.users.filter(u => u.role === 'customer').length;
+    const pendingOrdersCount = orders.filter(o => o.status !== 'Delivered' && o.status !== 'Cancelled').length;
+    const completedOrdersCount = orders.filter(o => o.status === 'Delivered').length;
+    const customersCount = users.filter(u => u.role === 'customer').length;
 
-  // Calculate Popular Foods
-  const foodCountMap: Record<string, { count: number; revenue: number; image: string }> = {};
-  orders.filter(o => o.status === 'Delivered').forEach(o => {
-    o.items.forEach(item => {
-      if (!foodCountMap[item.name]) {
-        foodCountMap[item.name] = { count: 0, revenue: 0, image: item.image };
-      }
-      foodCountMap[item.name].count += item.quantity;
-      foodCountMap[item.name].revenue += item.quantity * item.price;
+    const foodCountMap: Record<string, { count: number; revenue: number; image: string }> = {};
+    orders.filter(o => o.status === 'Delivered').forEach(o => {
+      o.items.forEach(item => {
+        if (!foodCountMap[item.name]) {
+          foodCountMap[item.name] = { count: 0, revenue: 0, image: item.image };
+        }
+        foodCountMap[item.name].count += item.quantity;
+        foodCountMap[item.name].revenue += item.quantity * item.price;
+      });
     });
-  });
 
-  const popularFoods = Object.entries(foodCountMap)
-    .map(([name, val]) => ({ name, ...val }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 5);
+    const popularFoods = Object.entries(foodCountMap)
+      .map(([name, val]) => ({ name, ...val }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
 
-  // Calculate Sales Graph (last 7 days)
-  const salesMap: Record<string, { orders: number; revenue: number }> = {};
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const dateStr = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    salesMap[dateStr] = { orders: 0, revenue: 0 };
-  }
-
-  orders.filter(o => o.status === 'Delivered').forEach(o => {
-    const dateStr = new Date(o.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-    if (salesMap[dateStr] !== undefined) {
-      salesMap[dateStr].orders += 1;
-      salesMap[dateStr].revenue += o.total;
+    const salesMap: Record<string, { orders: number; revenue: number }> = {};
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      salesMap[dateStr] = { orders: 0, revenue: 0 };
     }
-  });
 
-  const salesData = Object.entries(salesMap).map(([date, val]) => ({
-    date,
-    orders: val.orders,
-    revenue: Number(val.revenue.toFixed(2))
-  }));
+    orders.filter(o => o.status === 'Delivered').forEach(o => {
+      const dateStr = new Date(o.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      if (salesMap[dateStr] !== undefined) {
+        salesMap[dateStr].orders += 1;
+        salesMap[dateStr].revenue += o.total;
+      }
+    });
 
-  res.json({
-    totalOrders,
-    totalRevenue: Number(totalRevenue.toFixed(2)),
-    todayRevenue: Number(todayRevenue.toFixed(2)),
-    pendingOrdersCount,
-    completedOrdersCount,
-    customersCount,
-    popularFoods,
-    salesData
-  });
+    const salesData = Object.entries(salesMap).map(([date, val]) => ({
+      date,
+      orders: val.orders,
+      revenue: Number(val.revenue.toFixed(2))
+    }));
+
+    res.json({
+      totalOrders,
+      totalRevenue: Number(totalRevenue.toFixed(2)),
+      todayRevenue: Number(todayRevenue.toFixed(2)),
+      pendingOrdersCount,
+      completedOrdersCount,
+      customersCount,
+      popularFoods,
+      salesData
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to compute dashboard stats.' });
+  }
 });
 
-// Vite Middleware Setup or static serving for Production
+// Production static or Vite dev server setup
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
