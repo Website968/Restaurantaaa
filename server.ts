@@ -2,7 +2,6 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
-import firebaseConfig from './firebase-applet-config.json' with { type: 'json' };
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   getFirestore,
@@ -17,17 +16,34 @@ import {
   query,
   where
 } from 'firebase/firestore';
-
 const app = express();
 const PORT = 3000;
 
 app.use(express.json());
 
-// Initialize Firebase App & Firestore Database
-const firebaseApp = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+// Safely load Firebase Applet Config
+let firebaseConfig: any = {};
+try {
+  const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+  if (fs.existsSync(configPath)) {
+    firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+  }
+} catch (e) {
+  console.warn('Notice: Could not read firebase-applet-config.json:', e);
+}
 
-// Use default database for Firestore
-const db = getFirestore(firebaseApp);
+// Initialize Firebase App & Firestore Database safely
+let firebaseApp: any = null;
+let db: any = null;
+
+try {
+  if (firebaseConfig && firebaseConfig.projectId) {
+    firebaseApp = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+    db = getFirestore(firebaseApp);
+  }
+} catch (e) {
+  console.warn('Notice: Firebase initialization notice:', e);
+}
 
 // Types
 interface DBUser {
