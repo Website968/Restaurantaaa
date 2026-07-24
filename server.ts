@@ -4,6 +4,9 @@ import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
+  initializeFirestore,
+  memoryLocalCache,
+  setLogLevel,
   getFirestore,
   collection,
   doc,
@@ -16,6 +19,12 @@ import {
   query,
   where
 } from 'firebase/firestore';
+
+// Silence verbose background gRPC error logs when offline or connecting
+try {
+  setLogLevel('silent');
+} catch (e) {}
+
 const app = express();
 const PORT = 3000;
 
@@ -40,9 +49,7 @@ try {
     const fileData = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     firebaseConfig = { ...defaultConfig, ...fileData };
   }
-} catch (e) {
-  console.warn('Notice: Could not read firebase-applet-config.json:', e);
-}
+} catch (e) {}
 
 // Initialize Firebase App & Firestore Database safely
 let firebaseApp: any = null;
@@ -53,14 +60,16 @@ try {
     firebaseApp = !getApps().length ? initializeApp(firebaseConfig) : getApp();
     const dbId = firebaseConfig.firestoreDatabaseId;
     try {
-      db = (dbId && dbId !== '(default)') ? getFirestore(firebaseApp, dbId) : getFirestore(firebaseApp);
+      if (dbId && dbId !== '(default)') {
+        db = initializeFirestore(firebaseApp, { localCache: memoryLocalCache() }, dbId);
+      } else {
+        db = initializeFirestore(firebaseApp, { localCache: memoryLocalCache() });
+      }
     } catch (e) {
       db = getFirestore(firebaseApp);
     }
   }
-} catch (e) {
-  console.warn('Notice: Firebase initialization notice:', e);
-}
+} catch (e) {}
 
 // Types
 interface DBUser {
@@ -336,9 +345,25 @@ let fallbackOrders: DBOrder[] = [];
 let fallbackNotifications: DBNotification[] = [];
 
 // Helper functions for Firestore collections with graceful fallback
-async function getUsersFromFirestore(): Promise<DBUser[]> {
+async function withTimeout<T>(promise: Promise<T>, ms = 2500): Promise<T> {
+  let timeoutId: any;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error('Firestore timeout')), ms);
+  });
   try {
-    const snap = await getDocs(collection(db, 'users'));
+    const res = await Promise.race([promise, timeoutPromise]);
+    clearTimeout(timeoutId);
+    return res;
+  } catch (err) {
+    clearTimeout(timeoutId);
+    throw err;
+  }
+}
+
+async function getUsersFromFirestore(): Promise<DBUser[]> {
+  if (!db) return fallbackUsers;
+  try {
+    const snap = await withTimeout(getDocs(collection(db, 'users')));
     const firestoreUsers = snap.docs.map(d => ({ id: d.id, ...d.data() } as DBUser));
     const combinedMap = new Map<string, DBUser>();
     for (const u of fallbackUsers) {
@@ -349,43 +374,42 @@ async function getUsersFromFirestore(): Promise<DBUser[]> {
     }
     return Array.from(combinedMap.values());
   } catch (err) {
-    console.warn('Firestore users read notice (using fallback):', err instanceof Error ? err.message : err);
     return fallbackUsers;
   }
 }
 
 async function getCategoriesFromFirestore(): Promise<DBCategory[]> {
+  if (!db) return fallbackCategories;
   try {
-    const snap = await getDocs(collection(db, 'categories'));
+    const snap = await withTimeout(getDocs(collection(db, 'categories')));
     if (snap.docs.length > 0) {
       return snap.docs.map(d => ({ id: d.id, ...d.data() } as DBCategory));
     }
     return fallbackCategories;
   } catch (err) {
-    console.warn('Firestore categories read notice (using fallback):', err instanceof Error ? err.message : err);
     return fallbackCategories;
   }
 }
 
 async function getMenuItemsFromFirestore(): Promise<DBMenuItem[]> {
+  if (!db) return fallbackMenuItems;
   try {
-    const snap = await getDocs(collection(db, 'menuItems'));
+    const snap = await withTimeout(getDocs(collection(db, 'menuItems')));
     if (snap.docs.length > 0) {
       return snap.docs.map(d => ({ id: d.id, ...d.data() } as DBMenuItem));
     }
     return fallbackMenuItems;
   } catch (err) {
-    console.warn('Firestore menu read notice (using fallback):', err instanceof Error ? err.message : err);
     return fallbackMenuItems;
   }
 }
 
 async function getOrdersFromFirestore(): Promise<DBOrder[]> {
+  if (!db) return fallbackOrders;
   try {
-    const snap = await getDocs(collection(db, 'orders'));
+    const snap = await withTimeout(getDocs(collection(db, 'orders')));
     return snap.docs.map(d => ({ id: d.id, ...d.data() } as DBOrder));
   } catch (err) {
-    console.warn('Firestore orders read notice (using fallback):', err instanceof Error ? err.message : err);
     return fallbackOrders;
   }
 }
@@ -410,26 +434,27 @@ async function getSettingsFromFirestore(): Promise<DBRestaurantSettings> {
     contactPhone: '+91 9876543210',
   };
 
+  if (!db) return defaultSettings;
+
   try {
-    const docSnap = await getDoc(doc(db, 'restaurantSettings', 'default'));
+    const docSnap = await withTimeout(getDoc(doc(db, 'restaurantSettings', 'default')));
     if (docSnap.exists()) {
       return { ...defaultSettings, ...docSnap.data() } as DBRestaurantSettings;
     } else {
-      await setDoc(doc(db, 'restaurantSettings', 'default'), defaultSettings);
+      await withTimeout(setDoc(doc(db, 'restaurantSettings', 'default'), defaultSettings), 1500).catch(() => {});
       return defaultSettings;
     }
   } catch (err) {
-    console.warn('Firestore settings notice (using fallback):', err instanceof Error ? err.message : err);
     return defaultSettings;
   }
 }
 
 async function getNotificationsFromFirestore(): Promise<DBNotification[]> {
+  if (!db) return fallbackNotifications;
   try {
-    const snap = await getDocs(collection(db, 'notifications'));
+    const snap = await withTimeout(getDocs(collection(db, 'notifications')));
     return snap.docs.map(d => ({ id: d.id, ...d.data() } as DBNotification));
   } catch (err) {
-    console.warn('Firestore notifications notice (using fallback):', err instanceof Error ? err.message : err);
     return fallbackNotifications;
   }
 }
