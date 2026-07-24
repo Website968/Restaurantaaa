@@ -21,12 +21,24 @@ const PORT = 3000;
 
 app.use(express.json());
 
+// Fallback Firebase Applet Config
+const defaultConfig = {
+  projectId: "dumplingdream-50fc7",
+  appId: "1:1094911690931:web:3c56b3559405bf99d888c6",
+  apiKey: "AIzaSyCxg8RYU3BHSUGCtnrvyOztATjAk7BzmAw",
+  authDomain: "dumplingdream-50fc7.firebaseapp.com",
+  firestoreDatabaseId: "ai-studio-restaurantorderi-dcf7fd1c-9b61-446f-8afe-93b543f9ea64",
+  storageBucket: "dumplingdream-50fc7.firebasestorage.app",
+  messagingSenderId: "1094911690931"
+};
+
 // Safely load Firebase Applet Config
-let firebaseConfig: any = {};
+let firebaseConfig: any = defaultConfig;
 try {
   const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
   if (fs.existsSync(configPath)) {
-    firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    const fileData = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    firebaseConfig = { ...defaultConfig, ...fileData };
   }
 } catch (e) {
   console.warn('Notice: Could not read firebase-applet-config.json:', e);
@@ -39,7 +51,12 @@ let db: any = null;
 try {
   if (firebaseConfig && firebaseConfig.projectId) {
     firebaseApp = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-    db = getFirestore(firebaseApp);
+    const dbId = firebaseConfig.firestoreDatabaseId;
+    try {
+      db = (dbId && dbId !== '(default)') ? getFirestore(firebaseApp, dbId) : getFirestore(firebaseApp);
+    } catch (e) {
+      db = getFirestore(firebaseApp);
+    }
   }
 } catch (e) {
   console.warn('Notice: Firebase initialization notice:', e);
@@ -1423,6 +1440,8 @@ async function startServer() {
 
 export default app;
 
-if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
+const isVercel = Boolean(process.env.VERCEL || process.env.VERCEL_ENV || process.env.NOW_BUILDER);
+
+if (process.env.NODE_ENV !== 'test' && !isVercel) {
   startServer();
 }
